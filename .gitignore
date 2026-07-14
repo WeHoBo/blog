@@ -1,0 +1,28 @@
+# Java
+target/
+*.class
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+
+# Node
+node_modules/
+.nuxt/
+.output/
+dist/
+.vite/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Spring Boot
+*.log
+
+# Uploads
+uploads/
