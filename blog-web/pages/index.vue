@@ -4,8 +4,9 @@
       <!-- Left sidebar: category nav -->
       <aside class="hidden lg:block w-44 flex-shrink-0">
         <div class="sticky top-20 bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-          <div class="px-4 py-3 border-b dark:border-gray-700">
+          <div class="px-4 py-3 border-b dark:border-gray-700 flex items-center justify-between">
             <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">文章分类</h3>
+            <button @click="expandAll = !expandAll" class="text-xs text-gray-400 hover:text-blue-500 transition">{{ expandAll ? '收起' : '展开' }}</button>
           </div>
           <div class="py-1">
             <button
@@ -14,15 +15,25 @@
               class="w-full text-left px-4 py-2 text-sm transition">
               全部文章
             </button>
-            <button
-              v-for="cat in categories"
-              :key="cat.id"
-              @click="currentCategory = cat.id; pageNum = 1"
-              :class="currentCategory === cat.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-r-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
-              class="w-full text-left px-4 py-2 text-sm transition">
-              {{ cat.name }}
-              <span class="text-xs text-gray-400 ml-1">({{ cat.articleCount || 0 }})</span>
-            </button>
+            <template v-for="cat in categoryTree" :key="cat.id">
+              <button
+                @click="currentCategory = cat.id; pageNum = 1"
+                :class="currentCategory === cat.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-r-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
+                class="w-full text-left px-4 py-2 text-sm transition">
+                <span class="font-medium">{{ cat.name }}</span>
+                <span class="text-xs text-gray-400 ml-1">({{ cat.articleCount || 0 }})</span>
+              </button>
+              <button
+                v-if="(expandAll || currentCategory === cat.id || isChildSelected(cat)) && cat.children && cat.children.length > 0"
+                v-for="child in cat.children"
+                :key="child.id"
+                @click="currentCategory = child.id; pageNum = 1"
+                :class="currentCategory === child.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-r-2 border-blue-600' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
+                class="w-full text-left pl-8 py-1.5 text-sm transition">
+                {{ child.name }}
+                <span class="text-xs text-gray-400 ml-1">({{ child.articleCount || 0 }})</span>
+              </button>
+            </template>
           </div>
         </div>
       </aside>
@@ -113,11 +124,16 @@ const pageNum = ref(1)
 const keyword = ref((route.query.keyword as string) || '')
 const currentCategory = ref<number | undefined>(undefined)
 const articles = ref<any[]>([])
-const categories = ref<any[]>([])
+const categoryTree = ref<any[]>([])
 const tags = ref<any[]>([])
 const hotArticles = ref<any[]>([])
 const totalPages = ref(0)
 const loading = ref(true)
+const expandAll = ref(false)
+
+function isChildSelected(cat: any) {
+  return cat.children && cat.children.some((c: any) => c.id === currentCategory.value)
+}
 
 async function fetchArticles() {
   loading.value = true
@@ -134,8 +150,8 @@ async function fetchArticles() {
 }
 
 async function fetchCategories() {
-  const res = await get<any>('/article/categories')
-  if (res.code === 200) categories.value = res.data || []
+  const res = await get<any>('/category/tree')
+  if (res.code === 200) categoryTree.value = res.data || []
 }
 
 async function fetchTags() {

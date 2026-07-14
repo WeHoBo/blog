@@ -11,6 +11,14 @@
       </div>
     </div>
 
+    <!-- Batch actions -->
+    <div v-if="selectedIds.length > 0" class="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-4 py-3 mb-4 flex items-center gap-4 text-sm">
+      <span class="text-blue-600 dark:text-blue-400 font-medium">已选 {{ selectedIds.length }} 篇</span>
+      <button @click="handleBatchExport" class="px-3 py-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-xs">批量导出</button>
+      <button @click="handleBatchDelete" class="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-xs">批量删除</button>
+      <button @click="selectedIds = []" class="text-gray-400 hover:text-gray-600 transition text-xs">取消选择</button>
+    </div>
+
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-4 flex gap-3 flex-wrap">
       <input v-model="keyword" placeholder="搜索标题" class="px-3 py-1.5 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm" @keyup.enter="search" />
       <select v-model="statusFilter" @change="search" class="px-3 py-1.5 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm">
@@ -25,15 +33,21 @@
       <table class="w-full text-sm">
         <thead class="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
           <tr>
+            <th class="px-4 py-3 w-10">
+              <input type="checkbox" :checked="isAllSelected" @change="toggleAll" class="rounded" />
+            </th>
             <th class="px-4 py-3 text-left">标题</th>
             <th class="px-4 py-3 text-left w-24">状态</th>
             <th class="px-4 py-3 text-left w-20">阅读</th>
             <th class="px-4 py-3 text-left w-36">时间</th>
-            <th class="px-4 py-3 text-left w-28">操作</th>
+            <th class="px-4 py-3 text-left w-36">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="a in articles" :key="a.id" class="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+            <td class="px-4 py-3">
+              <input type="checkbox" :value="a.id" v-model="selectedIds" class="rounded" />
+            </td>
             <td class="px-4 py-3">
               <span v-if="a.isTop" class="text-red-500 text-xs mr-1">[置顶]</span>
               {{ a.title }}
@@ -114,6 +128,46 @@ async function handleImport(e: Event) {
     alert('导入失败: ' + (e.message || '未知错误'))
   }
   input.value = ''
+}
+
+const selectedIds = ref<number[]>([])
+const isAllSelected = computed(() => articles.value.length > 0 && selectedIds.value.length === articles.value.length)
+
+function toggleAll() {
+  if (isAllSelected.value) {
+    selectedIds.value = []
+  } else {
+    selectedIds.value = articles.value.map(a => a.id)
+  }
+}
+
+async function handleBatchDelete() {
+  if (!confirm(`确定删除选中的 ${selectedIds.value.length} 篇文章？`)) return
+  try {
+    await post('/article/batch-delete', selectedIds.value)
+    selectedIds.value = []
+    fetchList()
+  } catch (e: any) {
+    alert('批量删除失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function handleBatchExport() {
+  try {
+    const token = authStore?.token || ''
+    const resp = await $fetch(`${apiBase}/article/batch-export`, {
+      method: 'POST',
+      body: selectedIds.value,
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    const blob = new Blob([resp as any], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'articles-export.md'; a.click()
+    URL.revokeObjectURL(url)
+  } catch (e: any) {
+    alert('批量导出失败: ' + (e.message || '未知错误'))
+  }
 }
 
 watch(pageNum, () => fetchList())
