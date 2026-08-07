@@ -3,12 +3,14 @@ package com.blog.common.file;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.IdUtil;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 
 @Component
+@ConditionalOnProperty(name = "aliyun.oss.enabled", havingValue = "false", matchIfMissing = true)
 public class LocalFileStorage implements FileStorage {
 
     @Value("${file.upload.path:./uploads}")

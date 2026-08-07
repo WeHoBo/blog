@@ -24,6 +24,9 @@ public class GitHubOAuthProvider implements OAuthProvider {
     @Value("${oauth.github.proxy-port:0}")
     private int proxyPort;
 
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
+
     private static final String AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
     private static final String TOKEN_URL = "https://github.com/login/oauth/access_token";
     private static final String USER_URL = "https://api.github.com/user";
@@ -42,7 +45,7 @@ public class GitHubOAuthProvider implements OAuthProvider {
 
     @Override
     public String getAuthorizeUrl(String state) {
-        return AUTHORIZE_URL + "?client_id=" + clientId + "&state=" + state + "&scope=user:email";
+        return AUTHORIZE_URL + "?client_id=" + clientId + "&redirect_uri=" + baseUrl + "/api/auth/oauth/github/callback&state=" + state + "&scope=user:email";
     }
 
     @Override

@@ -1,19 +1,23 @@
-<template>
+﻿<template>
   <div>
     <div class="flex justify-between items-center mb-6">
-      <h1 class="text-2xl font-bold">文章管理</h1>
+      <h1 class="text-2xl font-bold gradient-text">文章管理</h1>
       <div class="flex gap-2">
-        <label class="px-4 py-2 border-2 border-dashed rounded-lg text-sm cursor-pointer hover:border-blue-500 hover:text-blue-500 transition">
+        <label class="px-4 py-2 border-2 border-dashed rounded-lg text-sm cursor-pointer hover:border-primary-500 hover:text-primary-500 transition">
           <input type="file" accept=".md" class="hidden" @change="handleImport" ref="fileInput" />
           导入 .md
         </label>
-        <NuxtLink to="/admin/articles/create" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">写文章</NuxtLink>
+        <label class="px-4 py-2 border-2 border-dashed rounded-lg text-sm cursor-pointer hover:border-green-500 hover:text-green-500 transition">
+          <input type="file" accept=".docx,.doc" class="hidden" @change="handleWordImport" ref="wordInput" />
+          导入 Word
+        </label>
+        <NuxtLink to="/admin/articles/create" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm">写文章</NuxtLink>
       </div>
     </div>
 
     <!-- Batch actions -->
-    <div v-if="selectedIds.length > 0" class="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-4 py-3 mb-4 flex items-center gap-4 text-sm">
-      <span class="text-blue-600 dark:text-blue-400 font-medium">已选 {{ selectedIds.length }} 篇</span>
+    <div v-if="selectedIds.length > 0" class="bg-primary-50 dark:bg-primary-900/20 rounded-lg px-4 py-3 mb-4 flex items-center gap-4 text-sm">
+      <span class="text-primary-600 dark:text-primary-400 font-medium">已选 {{ selectedIds.length }} 篇</span>
       <button @click="handleBatchExport" class="px-3 py-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-xs">批量导出</button>
       <button @click="handleBatchDelete" class="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-xs">批量删除</button>
       <button @click="selectedIds = []" class="text-gray-400 hover:text-gray-600 transition text-xs">取消选择</button>
@@ -60,7 +64,7 @@
             <td class="px-4 py-3 text-gray-400">{{ a.viewCount }}</td>
             <td class="px-4 py-3 text-gray-400">{{ a.createTime?.substring(0, 10) }}</td>
             <td class="px-4 py-3">
-              <NuxtLink :to="`/admin/articles/${a.id}`" class="text-blue-500 hover:underline text-xs mr-3">编辑</NuxtLink>
+              <NuxtLink :to="`/admin/articles/${a.id}`" class="text-primary-500 hover:underline text-xs mr-3">编辑</NuxtLink>
               <a :href="`${apiBase}/article/${a.id}/export`" class="text-green-500 hover:underline text-xs mr-3">导出</a>
               <button @click="handleDelete(a.id)" class="text-red-500 hover:underline text-xs">删除</button>
             </td>
@@ -126,6 +130,21 @@ async function handleImport(e: Event) {
     fetchList()
   } catch (e: any) {
     alert('导入失败: ' + (e.message || '未知错误'))
+  }
+  input.value = ''
+}
+
+async function handleWordImport(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    await post('/article/import-word', formData)
+    fetchList()
+  } catch (e: any) {
+    alert('Word 导入失败: ' + (e.message || '未知错误'))
   }
   input.value = ''
 }

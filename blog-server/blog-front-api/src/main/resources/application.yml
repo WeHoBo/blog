@@ -1,3 +1,7 @@
+app:
+  base-url: http://localhost:8080
+  web-url: http://localhost:3000
+
 server:
   port: 8080
 
@@ -6,7 +10,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/blog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
     username: root
-    password: 123456
+    password: CHANGE_ME
   data:
     redis:
       host: localhost
@@ -51,20 +55,29 @@ springdoc:
       packages-to-scan: com.blog.front.controller
 
 jwt:
-  secret: blog-secret-key-2024-this-is-a-very-long-secret-key-for-hs256
+  secret: CHANGE_ME
   expiration: 86400000
 
 file:
   upload:
     path: ./uploads
-    base-url: http://localhost:8080/uploads
+    base-url: /uploads
 
 oauth:
   github:
-    client-id: Ov23li7NmORHeQwyTfpY
-    client-secret: e91a18f13e5fff807b50e32fdb06bd7189976c66
+    client-id: CHANGE_ME
+    client-secret: CHANGE_ME
     proxy-host: 127.0.0.1
     proxy-port: 7890
   gitee:
-    client-id: f5d7506517c5aa0d96152eb26f23d5e712ff394cf56e653b5c7b7b2762fea78b
-    client-secret: ac9ae531cbeb81a0e91b2ae0c38c222a6aefe231dd7a0504ba3ab0608f3052b4
+    client-id: CHANGE_ME
+    client-secret: CHANGE_ME
+
+aliyun:
+  oss:
+    enabled: true
+    endpoint: oss-cn-wulanchabu.aliyuncs.com
+    bucket-name: wehobo
+    access-key-id: CHANGE_ME
+    access-key-secret: CHANGE_ME
+    base-dir: images/

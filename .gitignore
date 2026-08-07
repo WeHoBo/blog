@@ -26,3 +26,15 @@ Thumbs.db
 
 # Uploads
 uploads/
+
+# Secrets & deployment
+deploy/
+*.real
+*.yml.real
+
+# Build artifacts
+output.tar.gz
+output.zip
+tree.txt
+test-out.txt
+*.dump

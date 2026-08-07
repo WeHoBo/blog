@@ -27,6 +27,8 @@ public class Article extends BaseEntity {
 
     private Long categoryId;
 
+    private String series;
+
     private Integer isTop;
 
     private Integer viewCount;
@@ -35,5 +37,13 @@ public class Article extends BaseEntity {
 
     private Integer likeCount;
 
+    private Integer wordCount;
+
     private Integer isDeleted;
+
+    private Integer isEncrypted;
+
+    private Integer visibility;
+
+    private String password;
 }

@@ -1,0 +1,2 @@
+USE blog;
+ALTER TABLE article ADD COLUMN series VARCHAR(100) DEFAULT NULL COMMENT '文章系列名' AFTER category_id;

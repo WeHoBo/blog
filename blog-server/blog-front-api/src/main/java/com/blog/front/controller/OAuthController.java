@@ -13,6 +13,7 @@ import com.blog.common.utils.JwtUtils;
 import com.blog.common.vo.LoginVO;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,6 +30,9 @@ public class OAuthController {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
+
+    @Value("${app.web-url:http://localhost:3000}")
+    private String webUrl;
 
     private OAuthProvider getProvider(String provider) {
         return switch (provider) {
@@ -76,7 +80,7 @@ public class OAuthController {
         }
 
         String token = jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole());
-        response.sendRedirect("http://localhost:3000/oauth/callback?token=" + token
+        response.sendRedirect(webUrl + "/oauth/callback?token=" + token
                 + "&userId=" + user.getId()
                 + "&username=" + user.getUsername()
                 + "&nickname=" + (user.getNickname() != null ? user.getNickname() : "")

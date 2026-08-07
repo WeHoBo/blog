@@ -1,8 +1,8 @@
-<template>
+﻿<template>
   <div>
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold">分类管理</h1>
-      <button @click="openDialog()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">添加一级分类</button>
+      <button @click="openDialog()" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 transition">添加一级分类</button>
     </div>
 
     <div class="space-y-3">
@@ -10,14 +10,14 @@
         <!-- 一级分类行 -->
         <div class="flex items-center px-4 py-3 bg-gray-50 dark:bg-gray-700/50">
           <div class="flex-1 flex items-center gap-3">
-            <span class="text-blue-600 dark:text-blue-400 font-bold text-lg">●</span>
+            <span class="text-primary-600 dark:text-primary-400 font-bold text-lg">●</span>
             <span class="font-medium text-gray-900 dark:text-gray-100">{{ parent.name }}</span>
             <span class="text-xs text-gray-400">{{ parent.slug }}</span>
-            <span class="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full">{{ parent.articleCount || 0 }} 篇</span>
+            <span class="text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-full">{{ parent.articleCount || 0 }} 篇</span>
             <span class="text-xs text-gray-400">排序: {{ parent.sort }}</span>
           </div>
           <div class="flex gap-2">
-            <button @click="openChildDialog(parent.id)" class="px-3 py-1 text-xs border border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition">+ 子分类</button>
+            <button @click="openChildDialog(parent.id)" class="px-3 py-1 text-xs border border-primary-300 dark:border-primary-600 text-primary-600 dark:text-primary-400 rounded hover:bg-primary-50 dark:hover:bg-primary-900/20 transition">+ 子分类</button>
             <button @click="openDialog(parent)" class="px-3 py-1 text-xs border rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">编辑</button>
             <button @click="handleDelete(parent.id)" class="px-3 py-1 text-xs border border-red-200 dark:border-red-800 text-red-500 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition">删除</button>
           </div>
@@ -67,7 +67,7 @@
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button @click="dialogVisible = false" class="px-4 py-2 border rounded text-sm">取消</button>
-          <button @click="handleSave" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">保存</button>
+          <button @click="handleSave" class="px-4 py-2 bg-primary-600 text-white rounded text-sm">保存</button>
         </div>
       </div>
     </div>

@@ -1,50 +1,94 @@
-<template>
+﻿<template>
   <div class="max-w-7xl mx-auto py-6">
     <div class="flex gap-6">
+      <!-- Left TOC sidebar -->
+      <aside class="hidden lg:block w-56 flex-shrink-0">
+        <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
+          <TableOfContents :content="currentArticle?.contentMd || ''" />
+        </div>
+      </aside>
       <!-- Main content -->
       <main class="flex-1 min-w-0">
         <div v-if="pending" class="flex justify-center py-32">
-          <div class="animate-spin h-8 w-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+          <div class="animate-spin h-8 w-8 border-2 border-primary-600 border-t-transparent rounded-full"></div>
         </div>
-        <div v-else-if="error || !article" class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-20 text-center text-gray-400">
+        <div v-else-if="error" class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-20 text-center text-gray-400">
           <span class="text-5xl mb-4 block">🔍</span>
           文章不存在或已被删除
         </div>
         <article v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
           <!-- Meta header -->
           <div class="px-6 sm:px-10 pt-8">
-            <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4">
-              {{ article.title }}
+            <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4 neon-glow">
+              {{ currentArticle.title }}
             </h1>
             <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-400 mb-6 pb-6 border-b dark:border-gray-700">
-              <span>{{ article.createTime?.substring(0, 10) }}</span>
-              <span>👁 {{ article.viewCount }} 阅读</span>
-              <ReadingTime :content="article?.contentMd || ''" />
-              <span>💬 {{ article.commentCount || 0 }} 评论</span>
+              <span>{{ currentArticle.createTime?.substring(0, 10) }}</span>
+              <span v-if="author" class="flex items-center gap-1">
+                <img v-if="author.avatar" :src="author.avatar" class="w-5 h-5 rounded-full object-cover" />
+                <span>{{ author.nickname || author.username }}</span>
+              </span>
+              <span>👁 {{ currentArticle.viewCount }} 阅读</span>
+              <ReadingTime :content="currentArticle?.contentMd || ''" />
+              <span>📝 {{ wordCount }} 字</span>
+              <span>💬 {{ currentArticle.commentCount || 0 }} 评论</span>
             </div>
           </div>
 
           <!-- Cover -->
-          <img v-if="article.cover" :src="article.cover" class="w-full max-h-96 object-cover" />
+          <img v-if="currentArticle.cover" :src="currentArticle.cover" :alt="currentArticle.title" loading="lazy" class="w-full max-h-96 object-cover" />
 
           <!-- Content -->
           <div class="px-6 sm:px-10 py-8">
-            <MarkdownRenderer :content="article.contentMd || ''" />
+            <MarkdownRenderer :content="currentArticle.contentMd || ''" />
           </div>
 
           <!-- Tags -->
-          <div class="px-6 sm:px-10 pb-6">
+          <div class="px-6 sm:px-10 pb-6" v-if="articleTags.length > 0">
             <div class="flex flex-wrap gap-2">
-              <span v-for="t in (article.tags || [])" :key="t" class="px-3 py-1 rounded-full text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">{{ t }}</span>
+              <NuxtLink v-for="t in articleTags" :key="t.id" :to="`/?tagId=${t.id}`" class="px-3 py-1 rounded-full text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 hover:bg-primary-100 dark:hover:bg-primary-800/30 transition">
+                {{ t.name }}
+              </NuxtLink>
             </div>
           </div>
         </article>
 
+      <!-- Prev/Next -->
+      <div class="mt-10 flex justify-between gap-4 max-w-3xl mx-auto">
+        <NuxtLink v-if="prevArticle" :to="`/article/${prevArticle.id}`" class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 hover:shadow-md transition group">
+          <span class="text-xs text-gray-400">← 上一篇</span>
+          <p class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 line-clamp-1 mt-1">{{ prevArticle.title }}</p>
+        </NuxtLink>
+        <div v-else class="flex-1"></div>
+        <NuxtLink v-if="nextArticle" :to="`/article/${nextArticle.id}`" class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 hover:shadow-md transition group text-right">
+          <span class="text-xs text-gray-400">下一篇 →</span>
+          <p class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 line-clamp-1 mt-1">{{ nextArticle.title }}</p>
+        </NuxtLink>
+        <div v-else class="flex-1"></div>
+      </div>
+
         <!-- Back -->
         <div class="mt-6">
-          <NuxtLink to="/" class="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline text-sm font-medium">
+          <NuxtLink to="/" class="inline-flex items-center gap-1 text-primary-600 dark:text-primary-400 hover:underline text-sm font-medium">
             ← 返回首页
           </NuxtLink>
+        </div>
+
+        <!-- Author card -->
+        <div v-if="author" class="mt-10 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 flex items-center gap-4">
+          <div v-if="author.avatar" class="w-14 h-14 rounded-full bg-primary-100 overflow-hidden flex-shrink-0">
+            <img :src="author.avatar" class="w-full h-full object-cover" />
+          </div>
+          <div v-else class="w-14 h-14 rounded-full bg-primary-600 flex items-center justify-center text-white font-bold text-xl flex-shrink-0">{{ (author.nickname || author.username)?.[0] || '?' }}</div>
+          <div class="flex-1">
+            <div class="font-bold text-gray-900 dark:text-gray-100">{{ author.nickname || author.username }}</div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">技术博客作者</div>
+          </div>
+          <div class="text-xs text-gray-400 text-right">
+            <div>{{ wordCount }} 字 · {{ commentTotal }} 评论</div>
+            <div class="mt-1">{{ currentArticle?.createTime?.substring(0, 10) }}</div>
+          </div>
+          <button @click="copyShareLink" class="ml-4 px-3 py-1.5 text-xs border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">{{ shareCopied ? '✓ 已复制' : '📋 复制链接' }}</button>
         </div>
 
         <!-- Comments -->
@@ -58,7 +102,7 @@
               <div v-else class="space-y-4 mb-5">
                 <div v-for="c in comments" :key="c.id" class="border-b dark:border-gray-700 last:border-0 pb-4 last:pb-0">
                   <div class="flex items-center gap-2 text-xs text-gray-400 mb-2">
-                    <span class="font-medium text-gray-600 dark:text-gray-300">{{ c.userId }}</span>
+                    <span class="font-medium text-gray-600 dark:text-gray-300">{{ c.nickname || c.username || '匿名' }}</span>
                     <span>{{ c.createTime?.substring(0, 16) }}</span>
                   </div>
                   <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{{ c.content }}</p>
@@ -66,17 +110,17 @@
               </div>
 
               <div v-if="authStore.isLoggedIn" class="bg-gray-50 dark:bg-gray-750 rounded-lg p-4">
-                <textarea v-model="commentText" rows="3" placeholder="写下你的评论..." class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                <textarea v-model="commentText" rows="3" placeholder="写下你的评论..." class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"></textarea>
                 <div class="flex justify-between items-center mt-3">
                   <span class="text-xs text-gray-400">{{ commentText.length }}/500</span>
-                  <button @click="submitComment" :disabled="!commentText.trim() || commentSubmitting" class="px-5 py-2 bg-blue-600 text-white rounded-full text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition">
+                  <button @click="submitComment" :disabled="!commentText.trim() || commentSubmitting" class="px-5 py-2 bg-primary-600 text-white rounded-full text-sm font-medium hover:bg-primary-700 disabled:opacity-50 transition">
                     {{ commentSubmitting ? '提交中...' : '发表评论' }}
                   </button>
                 </div>
                 <p v-if="commentError" class="text-red-500 text-xs mt-2">{{ commentError }}</p>
               </div>
               <p v-else class="text-center text-sm text-gray-400 py-4">
-                <NuxtLink to="/login" class="text-blue-600 hover:underline">登录</NuxtLink>后发表评论
+                <NuxtLink to="/login" class="text-primary-600 hover:underline">登录</NuxtLink>后发表评论
               </p>
             </div>
           </div>
@@ -91,7 +135,7 @@
             <div class="p-4 grid gap-3 sm:grid-cols-2">
               <NuxtLink v-for="r in related" :key="r.id" :to="`/article/${r.id}`" class="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
                 <div class="flex-1 min-w-0">
-                  <h4 class="font-medium text-sm text-gray-900 dark:text-gray-100 line-clamp-2 hover:text-blue-600 dark:hover:text-blue-400 transition">{{ r.title }}</h4>
+                  <h4 class="font-medium text-sm text-gray-900 dark:text-gray-100 line-clamp-2 hover:text-primary-600 dark:hover:text-primary-400 transition">{{ r.title }}</h4>
                   <div class="text-xs text-gray-400 mt-1">{{ r.createTime?.substring(0, 10) }}</div>
                 </div>
               </NuxtLink>
@@ -99,13 +143,6 @@
           </div>
         </div>
       </main>
-
-      <!-- Right sidebar -->
-      <aside class="hidden lg:block w-64 flex-shrink-0">
-        <div class="sticky top-20 space-y-4">
-          <TableOfContents :content="article?.contentMd || ''" />
-        </div>
-      </aside>
     </div>
   </div>
 </template>
@@ -115,11 +152,18 @@ const route = useRoute()
 const { get } = useApi()
 const authStore = useAuthStore()
 
-const { data: article, pending, error } = await useAsyncData(`article-${route.params.id}`, async () => {
+const { data: articleRaw, pending, error } = await useAsyncData(`article-${route.params.id}`, async () => {
   const res = await get<any>(`/article/${route.params.id}`)
   if (res.code === 200) return res.data
   throw new Error(res.message || '文章不存在')
 })
+const article = computed(() => (articleRaw.value as any)?.article)
+const articleTags = computed(() => (articleRaw.value as any)?.tags || [])
+const author = computed(() => (articleRaw.value as any)?.author || null)
+
+const wordCount = computed(() => currentArticle.value?.wordCount || 0)
+
+const currentArticle = computed(() => article.value)
 
 const title = (article.value as any)?.title
 const summary = (article.value as any)?.summary
@@ -129,6 +173,21 @@ const commentSubmitting = ref(false)
 const commentError = ref('')
 const comments = ref<any[]>([])
 const commentTotal = ref(0)
+
+const shareCopied = ref(false)
+function copyShareLink() {
+  const url = window.location.href
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      shareCopied.value = true; setTimeout(() => shareCopied.value = false, 2000)
+    })
+  } else {
+    const el = document.createElement('textarea')
+    el.value = url; document.body.appendChild(el); el.select()
+    document.execCommand('copy'); document.body.removeChild(el)
+    shareCopied.value = true; setTimeout(() => shareCopied.value = false, 2000)
+  }
+}
 
 async function fetchComments() {
   try {
@@ -155,6 +214,19 @@ async function submitComment() {
     commentSubmitting.value = false
   }
 }
+
+const prevArticle = ref<any>(null)
+const nextArticle = ref<any>(null)
+async function fetchNeighbors() {
+  const res = await get<any>(`/article/list?pageSize=100`)
+  if (res.code === 200 && res.data?.records) {
+    const articles = res.data.records
+    const idx = articles.findIndex((a: any) => a.id === Number(route.params.id))
+    if (idx > 0) prevArticle.value = articles[idx - 1]
+    if (idx < articles.length - 1) nextArticle.value = articles[idx + 1]
+  }
+}
+fetchNeighbors()
 
 const related = ref<any[]>([])
 async function fetchRelated() {

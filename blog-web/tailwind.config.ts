@@ -12,16 +12,16 @@ export default <Config>{
     extend: {
       colors: {
         primary: {
-          50: '#f0f9ff',
-          100: '#e0f2fe',
-          200: '#bae6fd',
-          300: '#7dd3fc',
-          400: '#38bdf8',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          800: '#075985',
-          900: '#0c4a6e'
+          50: 'hsl(var(--ph) var(--ps) 97%)',
+          100: 'hsl(var(--ph) var(--ps) 93%)',
+          200: 'hsl(var(--ph) var(--ps) 85%)',
+          300: 'hsl(var(--ph) var(--ps) 75%)',
+          400: 'hsl(var(--ph) var(--ps) 66%)',
+          500: 'hsl(var(--ph) var(--ps) 55%)',
+          600: 'hsl(var(--ph) var(--ps) 50%)',
+          700: 'hsl(var(--ph) var(--ps) 42%)',
+          800: 'hsl(var(--ph) var(--ps) 33%)',
+          900: 'hsl(var(--ph) var(--ps) 24%)'
         }
       }
     }

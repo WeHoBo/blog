@@ -1,6 +1,6 @@
-<template>
+﻿<template>
   <div class="flex justify-center py-32">
-    <div class="animate-spin h-8 w-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+    <div class="animate-spin h-8 w-8 border-2 border-primary-600 border-t-transparent rounded-full"></div>
   </div>
 </template>
 

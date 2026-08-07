@@ -22,9 +22,19 @@ public class ArticleDTO {
 
     private Long categoryId;
 
+    private String series;
+
+    private String slug;
+
     private List<Long> tagIds;
 
     private Integer status;
 
     private Integer isTop;
+
+    private Integer isEncrypted;
+
+    private Integer visibility;
+
+    private String password;
 }

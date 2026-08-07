@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blog.common.dto.ArticleDTO;
 import com.blog.common.entity.Article;
+import com.blog.common.entity.ArticleTag;
 import com.blog.common.entity.Category;
 import com.blog.common.entity.Tag;
 import com.blog.common.exception.BusinessException;
@@ -12,6 +13,8 @@ import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.ArticleTagMapper;
 import com.blog.common.mapper.CategoryMapper;
 import com.blog.common.mapper.TagMapper;
+import com.blog.front.util.DocxToMdUtil;
+import com.blog.front.util.WordCounter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -22,6 +25,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,18 +37,34 @@ public class ArticleService {
     private final ArticleTagMapper articleTagMapper;
     private final RedisTemplate<String, Object> redisTemplate;
 
-    public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword) {
+    public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword, List<Long> categoryIds, String sort) {
         LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<Article>()
                 .eq(Article::getStatus, 1)
                 .eq(Article::getIsDeleted, 0);
-        if (categoryId != null) {
+        if (categoryIds != null && !categoryIds.isEmpty()) {
+            wrapper.in(Article::getCategoryId, categoryIds);
+        } else if (categoryId != null) {
             wrapper.eq(Article::getCategoryId, categoryId);
         }
         if (StrUtil.isNotBlank(keyword)) {
             wrapper.like(Article::getTitle, keyword);
         }
-        wrapper.orderByDesc(Article::getIsTop)
-                .orderByDesc(Article::getCreateTime);
+        if (tagId != null) {
+            List<ArticleTag> ats = articleTagMapper.selectList(
+                    new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getTagId, tagId));
+            List<Long> ids = ats.stream().map(ArticleTag::getArticleId).collect(Collectors.toList());
+            if (!ids.isEmpty()) {
+                wrapper.in(Article::getId, ids);
+            } else {
+                wrapper.eq(Article::getId, -1L);
+            }
+        }
+        if ("title".equals(sort)) {
+            wrapper.last("ORDER BY is_top DESC, CAST(title AS UNSIGNED) ASC, title ASC");
+        } else {
+            wrapper.orderByDesc(Article::getIsTop)
+                    .orderByDesc(Article::getCreateTime);
+        }
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 
@@ -85,7 +105,7 @@ public class ArticleService {
     public Article create(ArticleDTO dto, Long userId) {
         Article article = new Article();
         article.setTitle(dto.getTitle());
-        article.setSlug(generateSlug(dto.getTitle()));
+        article.setSlug(dto.getSlug() != null && !dto.getSlug().isBlank() ? dto.getSlug() : generateSlug(dto.getTitle()));
         article.setContentMd(dto.getContentMd());
         article.setContentHtml(dto.getContentHtml());
         article.setSummary(dto.getSummary());
@@ -93,8 +113,18 @@ public class ArticleService {
         article.setCategoryId(dto.getCategoryId());
         article.setStatus(dto.getStatus() != null ? dto.getStatus() : 0);
         article.setIsTop(dto.getIsTop() != null ? dto.getIsTop() : 0);
+        article.setWordCount(WordCounter.count(dto.getContentMd()));
         article.setUserId(userId);
         articleMapper.insert(article);
+
+        if (dto.getTagIds() != null && !dto.getTagIds().isEmpty()) {
+            for (Long tagId : dto.getTagIds()) {
+                ArticleTag at = new ArticleTag();
+                at.setArticleId(article.getId());
+                at.setTagId(tagId);
+                articleTagMapper.insert(at);
+            }
+        }
 
         if (dto.getCategoryId() != null) {
             Category category = categoryMapper.selectById(dto.getCategoryId());
@@ -113,7 +143,10 @@ public class ArticleService {
             throw new BusinessException("文章不存在");
         }
         article.setTitle(dto.getTitle());
-        if (!article.getTitle().equals(dto.getTitle())) {
+        if (dto.getSlug() != null && !dto.getSlug().isBlank()) {
+            article.setSlug(dto.getSlug());
+        }
+        if (!article.getTitle().equals(dto.getTitle()) && (dto.getSlug() == null || dto.getSlug().isBlank())) {
             article.setSlug(generateSlug(dto.getTitle()));
         }
         article.setContentMd(dto.getContentMd());
@@ -123,6 +156,7 @@ public class ArticleService {
         article.setCategoryId(dto.getCategoryId());
         article.setStatus(dto.getStatus());
         article.setIsTop(dto.getIsTop());
+        article.setWordCount(WordCounter.count(dto.getContentMd()));
         articleMapper.updateById(article);
         redisTemplate.delete("article:" + id);
         return article;
@@ -160,6 +194,26 @@ public class ArticleService {
                 .last("LIMIT 4"));
     }
 
+    public List<Tag> getTagsByArticleId(Long articleId) {
+        List<ArticleTag> ats = articleTagMapper.selectList(
+                new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getArticleId, articleId));
+        if (ats.isEmpty()) return List.of();
+        List<Long> tagIds = ats.stream().map(ArticleTag::getTagId).toList();
+        return tagMapper.selectBatchIds(tagIds);
+    }
+
+    public List<Article> getArticlesByTagId(Long tagId) {
+        List<ArticleTag> ats = articleTagMapper.selectList(
+                new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getTagId, tagId));
+        if (ats.isEmpty()) return List.of();
+        List<Long> articleIds = ats.stream().map(ArticleTag::getArticleId).toList();
+        return articleMapper.selectList(new LambdaQueryWrapper<Article>()
+                .eq(Article::getStatus, 1)
+                .eq(Article::getIsDeleted, 0)
+                .in(Article::getId, articleIds)
+                .orderByDesc(Article::getCreateTime));
+    }
+
     @Transactional
     public Article importMd(MultipartFile file, Long userId) throws IOException {
         String content = new String(file.getBytes(), java.nio.charset.StandardCharsets.UTF_8);
@@ -172,9 +226,31 @@ public class ArticleService {
         article.setUserId(userId);
         article.setStatus(0);
         article.setIsTop(0);
+        article.setWordCount(WordCounter.count(content));
         article.setSlug(generateSlug(title));
         articleMapper.insert(article);
         return article;
+    }
+
+    @Transactional
+    public Article importWord(MultipartFile file, Long userId) throws IOException {
+        String filename = file.getOriginalFilename();
+        String title = filename != null ? filename.replace(".docx", "").replace(".DOCX", "").replace(".doc", "").replace(".DOC", "") : "未命名";
+        try {
+            String content = DocxToMdUtil.convert(file.getInputStream());
+            Article article = new Article();
+            article.setTitle(title);
+            article.setContentMd(content);
+            article.setUserId(userId);
+            article.setStatus(0);
+            article.setIsTop(0);
+            article.setWordCount(WordCounter.count(content));
+            article.setSlug(generateSlug(title));
+            articleMapper.insert(article);
+            return article;
+        } catch (Exception e) {
+            throw new BusinessException("Word 解析失败: " + e.getMessage());
+        }
     }
 
     private String generateSlug(String title) {

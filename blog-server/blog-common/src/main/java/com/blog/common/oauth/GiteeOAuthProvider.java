@@ -16,6 +16,9 @@ public class GiteeOAuthProvider implements OAuthProvider {
     @Value("${oauth.gitee.client-secret}")
     private String clientSecret;
 
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
+
     private static final String AUTHORIZE_URL = "https://gitee.com/oauth/authorize";
     private static final String TOKEN_URL = "https://gitee.com/oauth/token";
     private static final String USER_URL = "https://gitee.com/api/v5/user";
@@ -28,7 +31,7 @@ public class GiteeOAuthProvider implements OAuthProvider {
     @Override
     public String getAuthorizeUrl(String state) {
         return AUTHORIZE_URL + "?client_id=" + clientId
-                + "&redirect_uri=" + "http://localhost:8080/api/auth/oauth/gitee/callback"
+                + "&redirect_uri=" + baseUrl + "/api/auth/oauth/gitee/callback"
                 + "&response_type=code&state=" + state;
     }
 
@@ -36,7 +39,7 @@ public class GiteeOAuthProvider implements OAuthProvider {
     public String getAccessToken(String code) {
         String body = "grant_type=authorization_code&code=" + code
                 + "&client_id=" + clientId + "&client_secret=" + clientSecret
-                + "&redirect_uri=" + "http://localhost:8080/api/auth/oauth/gitee/callback";
+                + "&redirect_uri=" + baseUrl + "/api/auth/oauth/gitee/callback";
         String result = HttpRequest.post(TOKEN_URL).body(body).execute().body();
         JSONObject json = JSON.parseObject(result);
         return json.getString("access_token");

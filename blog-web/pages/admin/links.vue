@@ -1,8 +1,8 @@
-<template>
+﻿<template>
   <div>
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold">友链管理</h1>
-      <button @click="openDialog()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">添加友链</button>
+      <button @click="openDialog()" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 transition">添加友链</button>
     </div>
 
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
@@ -27,7 +27,7 @@
               <span :class="l.status === 1 ? 'text-green-500' : 'text-gray-400'" class="text-xs">{{ l.status === 1 ? '显示' : '隐藏' }}</span>
             </td>
             <td class="px-4 py-3">
-              <button @click="openDialog(l)" class="text-blue-500 hover:underline text-xs mr-3">编辑</button>
+              <button @click="openDialog(l)" class="text-primary-500 hover:underline text-xs mr-3">编辑</button>
               <button @click="handleDelete(l.id)" class="text-red-500 hover:underline text-xs">删除</button>
             </td>
           </tr>
@@ -59,7 +59,7 @@
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button @click="dialogVisible = false" class="px-4 py-2 border rounded text-sm">取消</button>
-          <button @click="handleSave" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">保存</button>
+          <button @click="handleSave" class="px-4 py-2 bg-primary-600 text-white rounded text-sm">保存</button>
         </div>
       </div>
     </div>
