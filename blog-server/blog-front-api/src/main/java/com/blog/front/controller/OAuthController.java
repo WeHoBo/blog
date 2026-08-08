@@ -8,6 +8,7 @@ import com.blog.common.entity.User;
 import com.blog.common.mapper.UserMapper;
 import com.blog.common.oauth.GitHubOAuthProvider;
 import com.blog.common.oauth.GiteeOAuthProvider;
+import com.blog.common.oauth.HuaweiOAuthProvider;
 import com.blog.common.oauth.OAuthProvider;
 import com.blog.common.utils.JwtUtils;
 import com.blog.common.vo.LoginVO;
@@ -18,6 +19,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
@@ -27,6 +30,7 @@ public class OAuthController {
 
     private final GitHubOAuthProvider githubProvider;
     private final GiteeOAuthProvider giteeProvider;
+    private final HuaweiOAuthProvider huaweiProvider;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
@@ -38,6 +42,7 @@ public class OAuthController {
         return switch (provider) {
             case "github" -> githubProvider;
             case "gitee" -> giteeProvider;
+            case "huawei" -> huaweiProvider;
             default -> throw new IllegalArgumentException("不支持的平台: " + provider);
         };
     }
@@ -50,10 +55,17 @@ public class OAuthController {
     }
 
     @GetMapping("/{provider}/callback")
-    public void callback(@PathVariable String provider, @RequestParam String code,
+    public void callback(@PathVariable String provider,
+                         @RequestParam(required = false) String code,
+                         @RequestParam(required = false) String authorization_code,
                          HttpServletResponse response) throws IOException {
+        // 华为回跳参数名为 authorization_code，GitHub/Gitee 为 code
+        String authCode = code != null ? code : authorization_code;
+        if (authCode == null) {
+            throw new IllegalArgumentException("缺少授权码参数");
+        }
         OAuthProvider p = getProvider(provider);
-        String accessToken = p.getAccessToken(code);
+        String accessToken = p.getAccessToken(authCode);
         OAuthUser oauthUser = p.getUserInfo(accessToken);
 
         String providerKey = provider + "_id";
@@ -75,16 +87,20 @@ public class OAuthController {
                 user.setGithubId(oauthUser.getOpenId());
             } else if ("gitee".equals(provider)) {
                 user.setGiteeId(oauthUser.getOpenId());
+            } else if ("huawei".equals(provider)) {
+                user.setHuaweiId(oauthUser.getOpenId());
             }
             userMapper.insert(user);
         }
 
         String token = jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole());
-        response.sendRedirect(webUrl + "/oauth/callback?token=" + token
+        // 参数 URL 编码，防止中文昵称/特殊字符导致 Location header 非法
+        String callbackUrl = webUrl + "/oauth/callback?token=" + token
                 + "&userId=" + user.getId()
-                + "&username=" + user.getUsername()
-                + "&nickname=" + (user.getNickname() != null ? user.getNickname() : "")
-                + "&avatar=" + (user.getAvatar() != null ? user.getAvatar() : "")
-                + "&role=" + user.getRole());
+                + "&username=" + java.net.URLEncoder.encode(user.getUsername(), StandardCharsets.UTF_8)
+                + "&nickname=" + java.net.URLEncoder.encode(user.getNickname() != null ? user.getNickname() : "", StandardCharsets.UTF_8)
+                + "&avatar=" + java.net.URLEncoder.encode(user.getAvatar() != null ? user.getAvatar() : "", StandardCharsets.UTF_8)
+                + "&role=" + user.getRole();
+        response.sendRedirect(callbackUrl);
     }
 }

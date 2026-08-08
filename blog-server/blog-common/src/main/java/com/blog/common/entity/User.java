@@ -27,5 +27,7 @@ public class User extends BaseEntity {
 
     private String giteeId;
 
+    private String huaweiId;
+
     private String source;
 }

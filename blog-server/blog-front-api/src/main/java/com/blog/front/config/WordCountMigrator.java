@@ -26,11 +26,17 @@ public class WordCountMigrator implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
         try (Connection conn = dataSource.getConnection()) {
-            if (!columnExists(conn)) {
+            if (!columnExists(conn, "article", "word_count")) {
                 try (Statement st = conn.createStatement()) {
                     st.execute("ALTER TABLE article ADD COLUMN word_count INT DEFAULT 0");
                 }
                 log.info("word_count column added");
+            }
+            if (!columnExists(conn, "user", "huawei_id")) {
+                try (Statement st = conn.createStatement()) {
+                    st.execute("ALTER TABLE user ADD COLUMN huawei_id VARCHAR(100) DEFAULT NULL");
+                }
+                log.info("huawei_id column added");
             }
             backfill(conn);
         } catch (Exception e) {
@@ -38,12 +44,15 @@ public class WordCountMigrator implements ApplicationRunner {
         }
     }
 
-    private boolean columnExists(Connection conn) throws Exception {
+    private boolean columnExists(Connection conn, String table, String column) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'article' AND column_name = 'word_count'");
-             ResultSet rs = ps.executeQuery()) {
-            rs.next();
-            return rs.getInt(1) > 0;
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?")) {
+            ps.setString(1, table);
+            ps.setString(2, column);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1) > 0;
+            }
         }
     }
 
