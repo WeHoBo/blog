@@ -154,6 +154,23 @@ def get_documents():
     return {"documents": db.list_documents()}
 
 
+# ---------------- 接口二点五：健康检查 ----------------
+@app.get("/health")
+def health():
+    """健康检查：供 Java/运维确认服务与向量库状态"""
+    chunks = 0
+    try:
+        if vector_store is not None:
+            chunks = vector_store.count()
+    except Exception:
+        pass
+    return {
+        "status": "ok",
+        "chunks": chunks,
+        "token_required": bool(config.RAG_API_TOKEN),
+    }
+
+
 # ---------------- 接口三：博客文章批量入库 ----------------
 @app.post("/ingest-articles")
 async def ingest_articles(articles: list[ArticleIn]):
@@ -200,9 +217,14 @@ async def free_chat(req: FreeChatRequest):
 
     async def generate():
         answer = ""
-        async for delta in llm.stream_chat(messages):
-            answer += delta
-            yield delta
+        try:
+            async for delta in llm.stream_chat(messages):
+                answer += delta
+                yield delta
+        except Exception as e:
+            print(f"[流式错误][free] {e}")
+            yield "抱歉，AI 服务暂时不可用，请稍后重试。" if not answer else "\n\n> ⚠️ 回答生成中断，请重试。"
+            return
         await asyncio.to_thread(db.add_chat, f"[free] {req.question[:100]}", answer)
 
     return StreamingResponse(
@@ -236,10 +258,15 @@ async def chat(req: ChatRequest):
             return
 
         answer = ""
-        # 3) 调用 DeepSeek 流式接口，逐段转发
-        async for delta in llm.stream_chat(messages):
-            answer += delta
-            yield delta
+        # 3) 调用 DeepSeek 流式接口，逐段转发；中途异常时输出可读提示而不是直接断流
+        try:
+            async for delta in llm.stream_chat(messages):
+                answer += delta
+                yield delta
+        except Exception as e:
+            print(f"[流式错误][chat] {e}")
+            yield "抱歉，AI 服务暂时不可用，请稍后重试。" if not answer else "\n\n> ⚠️ 回答生成中断，请重试。"
+            return
         # 4) 流结束后将本轮问答写入 SQLite 历史
         await asyncio.to_thread(db.add_chat, req.question, answer)
 
@@ -272,7 +299,6 @@ async def chat(req: ChatRequest):
                 })
         import json as _json
         yield "\n@@SOURCES@@\n" + _json.dumps(sources, ensure_ascii=False)
-        await asyncio.to_thread(db.add_chat, req.question, answer)
 
     # 以 text/plain 流式返回，前端用 ReadableStream 逐块读取
     return StreamingResponse(

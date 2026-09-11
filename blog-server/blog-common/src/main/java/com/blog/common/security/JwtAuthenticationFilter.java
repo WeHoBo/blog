@@ -21,6 +21,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtUtils jwtUtils;
+
+    /**
+     * StreamingResponseBody 等异步请求在收尾阶段会触发 ASYNC dispatch，
+     * Security 的 AuthorizationFilter 会再次鉴权；若这里跳过异步分发，
+     * 上下文为空会被拒绝（Access Denied）并掐断已提交的流式响应。
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {

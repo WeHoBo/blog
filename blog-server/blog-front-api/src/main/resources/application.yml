@@ -28,6 +28,10 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 20MB
+  mvc:
+    async:
+      # AI 流式回答可能持续数分钟；Spring MVC 默认异步超时 30s，超时会把已开始的流式响应直接掐断
+      request-timeout: 300s
 
 logging:
   level:

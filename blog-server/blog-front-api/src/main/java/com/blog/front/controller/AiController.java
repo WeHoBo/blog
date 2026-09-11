@@ -4,11 +4,14 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import com.blog.common.dto.Result;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -17,6 +20,7 @@ import java.nio.charset.StandardCharsets;
  * /free     自由问答（代码解释/全文总结，无检索，流式）
  * 鉴权由 SecurityConfig 的 /api/** authenticated 统一控制（需登录）。
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/ai")
 @RequiredArgsConstructor
@@ -39,30 +43,54 @@ public class AiController {
     private StreamingResponseBody forward(String path, String rawBody) {
         final String payload = (rawBody == null || rawBody.isBlank()) ? "{}" : rawBody;
         return outputStream -> {
-            HttpResponse resp = withAuth(HttpRequest.post(ragUrl + path))
-                    .header("Content-Type", "application/json")
-                    .body(payload.getBytes(StandardCharsets.UTF_8))
-                    .timeout(180000)
-                    .execute();
-            try (InputStream in = resp.bodyStream()) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = in.read(buf)) != -1) {
-                    outputStream.write(buf, 0, n);
+            HttpResponse resp = null;
+            try {
+                resp = withAuth(HttpRequest.post(ragUrl + path))
+                        .header("Content-Type", "application/json")
+                        .body(payload.getBytes(StandardCharsets.UTF_8))
+                        .timeout(300000)
+                        .execute();
+                int status = resp.getStatus();
+                if (status != 200) {
+                    String detail = resp.body();
+                    if (detail == null || detail.isBlank()) {
+                        detail = "AI 服务异常(HTTP " + status + ")";
+                    }
+                    writeFriendlyError(outputStream, detail);
+                    return;
                 }
-                outputStream.flush();
+                try (InputStream in = resp.bodyStream()) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        outputStream.write(buf, 0, n);
+                    }
+                    outputStream.flush();
+                }
             } catch (Exception e) {
-                // 转发中断（客户端断开）不视为服务端错误
-                return;
+                log.warn("AI 转发中断: {}", e.getMessage());
+                try {
+                    writeFriendlyError(outputStream, "AI 服务连接中断，请稍后重试");
+                } catch (Exception ignored) {
+                }
+            } finally {
+                if (resp != null) {
+                    resp.close();
+                }
             }
         };
+    }
+
+    private void writeFriendlyError(OutputStream outputStream, String message) throws IOException {
+        outputStream.write(("\n\n> ⚠️ " + message + "\n").getBytes(StandardCharsets.UTF_8));
+        outputStream.flush();
     }
 
     /** RAG 流式问答（检索博客文章后回答） */
     @PostMapping("/chat")
     public StreamingResponseBody chat(@RequestBody(required = false) String rawBody,
                                       jakarta.servlet.http.HttpServletResponse httpResponse) {
-        httpResponse.setContentType("text/plain;charset=utf-8");
+        prepareStreamResponse(httpResponse);
         return forward("/chat", rawBody);
     }
 
@@ -70,8 +98,14 @@ public class AiController {
     @PostMapping("/free")
     public StreamingResponseBody free(@RequestBody(required = false) String rawBody,
                                       jakarta.servlet.http.HttpServletResponse httpResponse) {
-        httpResponse.setContentType("text/plain;charset=utf-8");
+        prepareStreamResponse(httpResponse);
         return forward("/free-chat", rawBody);
+    }
+
+    private void prepareStreamResponse(jakarta.servlet.http.HttpServletResponse httpResponse) {
+        httpResponse.setContentType("text/plain;charset=utf-8");
+        httpResponse.setHeader("X-Accel-Buffering", "no");
+        httpResponse.setHeader("Cache-Control", "no-cache");
     }
 
     /** 获取 RAG 已入库文档列表（调试用） */
@@ -81,7 +115,11 @@ public class AiController {
             HttpResponse resp = withAuth(HttpRequest.get(ragUrl + "/documents"))
                     .timeout(10000)
                     .execute();
-            return Result.ok(com.alibaba.fastjson2.JSON.parse(resp.body()));
+            try {
+                return Result.ok(com.alibaba.fastjson2.JSON.parse(resp.body()));
+            } finally {
+                resp.close();
+            }
         } catch (Exception e) {
             return Result.fail(500, "RAG 服务不可用: " + e.getMessage());
         }
