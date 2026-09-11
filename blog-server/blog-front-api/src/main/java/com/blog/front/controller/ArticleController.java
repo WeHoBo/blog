@@ -5,12 +5,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blog.common.dto.ArticleDTO;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.Article;
+import com.blog.common.entity.ArticleRevision;
 import com.blog.common.entity.Category;
 import com.blog.common.entity.Tag;
 import com.blog.common.entity.User;
 import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.CategoryMapper;
 import com.blog.common.mapper.UserMapper;
+import com.blog.front.cache.ArticleCacheKeys;
 import com.blog.front.service.ArticleService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -25,7 +27,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -37,11 +38,6 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/article")
 @RequiredArgsConstructor
 public class ArticleController {
-
-    /** 归档 / 系列聚合结果缓存 */
-    private static final String CACHE_KEY_ARCHIVE = "article:archive";
-    private static final String CACHE_KEY_SERIES = "article:series";
-    private static final Duration AGG_CACHE_TTL = Duration.ofMinutes(10);
 
     private final ArticleService articleService;
     private final CategoryMapper categoryMapper;
@@ -64,7 +60,7 @@ public class ArticleController {
 
     private void writeAggCache(String key, Object value) {
         try {
-            redisTemplate.opsForValue().set(key, value, AGG_CACHE_TTL);
+            redisTemplate.opsForValue().set(key, value, ArticleCacheKeys.AGG_TTL);
         } catch (Exception ignored) {
             // 缓存写入失败不影响接口返回
         }
@@ -73,7 +69,7 @@ public class ArticleController {
     /** 文章变更后让归档 / 系列聚合缓存失效 */
     private void evictAggCache() {
         try {
-            redisTemplate.delete(List.of(CACHE_KEY_ARCHIVE, CACHE_KEY_SERIES));
+            redisTemplate.delete(List.of(ArticleCacheKeys.ARCHIVE, ArticleCacheKeys.SERIES));
         } catch (Exception ignored) {
             // 缓存失效失败时等待 TTL 自然过期
         }
@@ -83,6 +79,15 @@ public class ArticleController {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         return authentication != null && authentication.getAuthorities().stream()
                 .anyMatch(a -> "ROLE_admin".equals(a.getAuthority()));
+    }
+
+    /** 当前登录用户 id（用于写入版本快照的「修改人」） */
+    private Long currentUserId() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof Long id)) {
+            return null;
+        }
+        return id;
     }
 
     @GetMapping("/list")
@@ -205,6 +210,20 @@ public class ArticleController {
         return Result.ok(articleService.neighbors(id));
     }
 
+    /**
+     * 自定义 URL 可用性预检。编辑器在 slug 失焦时调用，
+     * 把「唯一键冲突」这类只有保存时才会暴露的问题提前到输入阶段。
+     */
+    @PreAuthorize("hasRole('admin')")
+    @GetMapping("/slug-available")
+    public Result<Map<String, Object>> slugAvailable(
+            @RequestParam String slug,
+            @RequestParam(required = false) Long excludeId) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("available", articleService.slugAvailable(slug, excludeId));
+        return Result.ok(result);
+    }
+
     @PreAuthorize("hasRole('admin')")
     @GetMapping("/admin/list")
     public Result<Page<Article>> adminList(
@@ -219,16 +238,21 @@ public class ArticleController {
     @PreAuthorize("hasRole('admin')")
     @PostMapping
     public Result<Article> create(@Valid @RequestBody ArticleDTO dto) {
-        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Article created = articleService.create(dto, userId);
+        Article created = articleService.create(dto, currentUserId());
         evictAggCache();
         return Result.ok(created);
     }
 
+    /**
+     * @param autosave 编辑器的自动保存会带上它：不影响保存结果，只影响「是否留版本快照」
+     *                 （自动保存每 10 分钟最多留一版，避免把版本历史刷满）
+     */
     @PreAuthorize("hasRole('admin')")
     @PutMapping("/{id}")
-    public Result<Article> update(@PathVariable Long id, @Valid @RequestBody ArticleDTO dto) {
-        Article updated = articleService.update(id, dto);
+    public Result<Article> update(@PathVariable Long id,
+                                  @Valid @RequestBody ArticleDTO dto,
+                                  @RequestParam(defaultValue = "false") boolean autosave) {
+        Article updated = articleService.update(id, dto, currentUserId(), autosave);
         evictAggCache();
         return Result.ok(updated);
     }
@@ -241,18 +265,95 @@ public class ArticleController {
         return Result.ok();
     }
 
+    // =================================================================
+    // 版本历史
+    // =================================================================
+
+    @PreAuthorize("hasRole('admin')")
+    @GetMapping("/{id:\\d+}/revisions")
+    public Result<List<ArticleRevision>> revisions(@PathVariable Long id,
+                                                   @RequestParam(defaultValue = "30") int limit) {
+        return Result.ok(articleService.revisions(id, limit));
+    }
+
+    @PreAuthorize("hasRole('admin')")
+    @GetMapping("/{id:\\d+}/revisions/{revisionId}")
+    public Result<ArticleRevision> revisionDetail(@PathVariable Long id,
+                                                  @PathVariable Long revisionId) {
+        return Result.ok(articleService.revisionDetail(id, revisionId));
+    }
+
+    @PreAuthorize("hasRole('admin')")
+    @PostMapping("/{id:\\d+}/revisions/{revisionId}/restore")
+    public Result<Article> restoreRevision(@PathVariable Long id, @PathVariable Long revisionId) {
+        Article restored = articleService.restoreRevision(id, revisionId, currentUserId());
+        evictAggCache();
+        return Result.ok(restored);
+    }
+
+    // =================================================================
+    // 回收站
+    // =================================================================
+
+    @PreAuthorize("hasRole('admin')")
+    @GetMapping("/trash/list")
+    public Result<Map<String, Object>> trashList(
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String keyword) {
+        return Result.ok(articleService.trashPage(pageNum, pageSize, keyword));
+    }
+
+    @PreAuthorize("hasRole('admin')")
+    @PostMapping("/{id:\\d+}/restore")
+    public Result<?> restore(@PathVariable Long id) {
+        articleService.restoreFromTrash(id);
+        evictAggCache();
+        return Result.ok();
+    }
+
+    @PreAuthorize("hasRole('admin')")
+    @PostMapping("/batch-restore")
+    public Result<?> batchRestore(@RequestBody List<Long> ids) {
+        for (Long id : ids) {
+            articleService.restoreFromTrash(id);
+        }
+        evictAggCache();
+        return Result.ok();
+    }
+
+    @PreAuthorize("hasRole('admin')")
+    @DeleteMapping("/{id:\\d+}/force")
+    public Result<?> forceDelete(@PathVariable Long id) {
+        articleService.forceDelete(id);
+        evictAggCache();
+        return Result.ok();
+    }
+
+    @PreAuthorize("hasRole('admin')")
+    @PostMapping("/batch-force-delete")
+    public Result<?> batchForceDelete(@RequestBody List<Long> ids) {
+        for (Long id : ids) {
+            articleService.forceDelete(id);
+        }
+        evictAggCache();
+        return Result.ok();
+    }
+
+    // =================================================================
+    // 导入 / 导出
+    // =================================================================
+
     @PreAuthorize("hasRole('admin')")
     @PostMapping("/import")
     public Result<Article> importMd(@RequestParam("file") MultipartFile file) throws IOException {
-        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        return Result.ok(articleService.importMd(file, userId));
+        return Result.ok(articleService.importMd(file, currentUserId()));
     }
 
     @PreAuthorize("hasRole('admin')")
     @PostMapping("/import-word")
     public Result<Article> importWord(@RequestParam("file") MultipartFile file) throws IOException {
-        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        return Result.ok(articleService.importWord(file, userId));
+        return Result.ok(articleService.importWord(file, currentUserId()));
     }
 
     @PreAuthorize("hasRole('admin')")
@@ -268,36 +369,39 @@ public class ArticleController {
     @PreAuthorize("hasRole('admin')")
     @PostMapping("/batch-export")
     public void batchExport(@RequestBody List<Long> ids, HttpServletResponse response) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        for (Long id : ids) {
-            Article article = articleService.getAdminById(id);
-            sb.append("---\n");
-            sb.append("title: ").append(article.getTitle()).append("\n");
-            sb.append("date: ").append(article.getCreateTime()).append("\n");
-            sb.append("---\n\n");
-            sb.append(article.getContentMd() != null ? article.getContentMd() : "").append("\n\n");
-        }
-        String filename = "articles-export.md";
-        response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
-        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" +
-                URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20"));
-        response.getOutputStream().write(sb.toString().getBytes(StandardCharsets.UTF_8));
+        writeMarkdownResponse(response, articleService.exportMarkdownBatch(ids), "articles-export.md");
     }
 
+    @PreAuthorize("hasRole('admin')")
     @GetMapping("/{id}/export")
     public void exportMd(@PathVariable Long id, HttpServletResponse response) throws IOException {
-        Article article = articleService.getPublicById(id);
-        String content = article.getContentMd() != null ? article.getContentMd() : "";
-        String filename = article.getTitle() + ".md";
+        Article article = articleService.getAdminById(id);
+        writeMarkdownResponse(response, articleService.exportMarkdown(id),
+                normalizeFileName(article.getTitle()) + ".md");
+    }
+
+    private void writeMarkdownResponse(HttpServletResponse response, String content, String filename)
+            throws IOException {
         response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" +
                 URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20"));
         response.getOutputStream().write(content.getBytes(StandardCharsets.UTF_8));
     }
 
+    private String normalizeFileName(String name) {
+        if (name == null || name.isBlank()) {
+            return "article";
+        }
+        return name.replaceAll("[\\\\/:*?\"<>|]", "_");
+    }
+
+    // =================================================================
+    // 聚合（归档 / 系列）
+    // =================================================================
+
     @GetMapping("/archive")
     public Result<Map<String, Object>> archive() {
-        Map<String, Object> cached = readAggCache(CACHE_KEY_ARCHIVE);
+        Map<String, Object> cached = readAggCache(ArticleCacheKeys.ARCHIVE);
         if (cached != null) {
             return Result.ok(cached);
         }
@@ -318,6 +422,7 @@ public class ArticleController {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", a.getId());
             item.put("title", a.getTitle());
+            item.put("slug", a.getSlug());
             item.put("createTime", a.getCreateTime().toString().substring(0, 10));
             yearMap.get(year).get(month).add(item);
         }
@@ -340,13 +445,13 @@ public class ArticleController {
             yearList.add(yearItem);
         }
         result.put("archives", yearList);
-        writeAggCache(CACHE_KEY_ARCHIVE, result);
+        writeAggCache(ArticleCacheKeys.ARCHIVE, result);
         return Result.ok(result);
     }
 
     @GetMapping("/series")
     public Result<List<Map<String, Object>>> seriesList() {
-        List<Map<String, Object>> cached = readAggCache(CACHE_KEY_SERIES);
+        List<Map<String, Object>> cached = readAggCache(ArticleCacheKeys.SERIES);
         if (cached != null) {
             return Result.ok(cached);
         }
@@ -369,7 +474,7 @@ public class ArticleController {
             item.put("count", e.getValue());
             result.add(item);
         }
-        writeAggCache(CACHE_KEY_SERIES, result);
+        writeAggCache(ArticleCacheKeys.SERIES, result);
         return Result.ok(result);
     }
 }

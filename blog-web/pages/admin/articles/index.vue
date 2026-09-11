@@ -67,6 +67,7 @@
               <td class="px-4 py-3 text-gray-400 whitespace-nowrap">{{ a.createTime?.substring(0, 10) }}</td>
               <td class="px-4 py-3 whitespace-nowrap">
                 <NuxtLink :to="`/admin/articles/${a.id}`" class="text-primary-500 hover:underline text-xs mr-3">编辑</NuxtLink>
+                <NuxtLink :to="`/admin/articles/revisions/${a.id}`" class="text-gray-500 hover:underline text-xs mr-3">历史</NuxtLink>
                 <button @click="handleExportOne(a)" class="text-green-500 hover:underline text-xs mr-3">导出</button>
                 <button @click="handleDelete(a.id)" class="text-red-500 hover:underline text-xs">删除</button>
               </td>

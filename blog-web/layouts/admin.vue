@@ -11,6 +11,7 @@
         <!-- 窄屏横向滚动，避免 7 个导航项溢出被裁掉 -->
         <nav class="flex gap-4 text-sm overflow-x-auto whitespace-nowrap flex-1 min-w-0 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <NuxtLink to="/admin/articles" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">文章</NuxtLink>
+          <NuxtLink to="/admin/articles/trash" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">回收站</NuxtLink>
           <NuxtLink to="/admin/categories" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">分类</NuxtLink>
           <NuxtLink to="/admin/tags" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">标签</NuxtLink>
           <NuxtLink to="/admin/links" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">友链</NuxtLink>

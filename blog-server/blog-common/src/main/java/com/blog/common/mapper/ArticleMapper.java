@@ -3,8 +3,11 @@ package com.blog.common.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.blog.common.entity.Article;
 import com.blog.common.vo.CategoryArticleCount;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -19,4 +22,48 @@ public interface ArticleMapper extends BaseMapper<Article> {
             + "WHERE status = 1 AND is_deleted = 0 AND category_id IS NOT NULL "
             + "GROUP BY category_id")
     List<CategoryArticleCount> countPublishedByCategory();
+
+    // ---------------------------------------------------------------
+    // 以下方法用于「回收站」。逻辑删除由 MyBatis-Plus 在自动生成的 SQL 上注入
+    // is_deleted = 0，因此常规 BaseMapper 方法根本查不到已删除的行，
+    // 这里用原生 SQL 显式绕过（项目约定零 XML，故全部走注解）。
+    // ---------------------------------------------------------------
+
+    /** 回收站分页（只取展示字段，不读 content_md / content_html） */
+    @Select("<script>"
+            + "SELECT id, title, slug, status, user_id, category_id, series, is_top, "
+            + "view_count, comment_count, like_count, word_count, create_time, update_time "
+            + "FROM article WHERE is_deleted = 1 "
+            + "<if test='keyword != null and keyword != \"\"'> AND title LIKE CONCAT('%', #{keyword}, '%') </if>"
+            + "ORDER BY update_time DESC LIMIT #{offset}, #{size}"
+            + "</script>")
+    List<Article> selectTrashPage(@Param("keyword") String keyword,
+                                  @Param("offset") int offset,
+                                  @Param("size") int size);
+
+    /** 回收站总数 */
+    @Select("<script>"
+            + "SELECT COUNT(*) FROM article WHERE is_deleted = 1 "
+            + "<if test='keyword != null and keyword != \"\"'> AND title LIKE CONCAT('%', #{keyword}, '%') </if>"
+            + "</script>")
+    long countTrash(@Param("keyword") String keyword);
+
+    /** 从回收站恢复 */
+    @Update("UPDATE article SET is_deleted = 0 WHERE id = #{id} AND is_deleted = 1")
+    int restoreById(@Param("id") Long id);
+
+    /** 彻底删除（物理删除，绕过逻辑删除） */
+    @Delete("DELETE FROM article WHERE id = #{id}")
+    int forceDeleteById(@Param("id") Long id);
+
+    /**
+     * slug 占用检查。
+     * 注意：逻辑删除的行仍然占着 uk_slug 唯一索引，所以这里**不过滤 is_deleted**，
+     * 否则会给出「可用」的假信号，等真正插入时才报唯一键冲突。
+     */
+    @Select("<script>"
+            + "SELECT COUNT(*) FROM article WHERE slug = #{slug} "
+            + "<if test='excludeId != null'> AND id &lt;&gt; #{excludeId} </if>"
+            + "</script>")
+    long countBySlugIncludingDeleted(@Param("slug") String slug, @Param("excludeId") Long excludeId);
 }

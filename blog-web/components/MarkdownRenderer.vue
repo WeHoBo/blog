@@ -60,10 +60,16 @@ md.renderer.rules.heading_open = function (tokens: any, idx: number) {
 const renderedHtml = computed(() => md.render(props.content || ''))
 const contentRef = ref<HTMLElement | null>(null)
 
-onMounted(async () => {
-  const el = contentRef.value
-  if (!el) return
-
+/**
+ * 所有「依赖渲染后 DOM」的增强（mermaid 渲染、代码块复制按钮、点击放大）统一在这里做。
+ * <p>
+ * 以前这些逻辑写在 onMounted 里、只在组件挂载时跑一次；而正文可能：
+ *   - 在编辑器里实时变化（v-html 被反复重写）
+ *   - 在文章页做客户端路由跳转（组件不重新挂载，只换 props）
+ * 两种情况都会让这些增强在旧的 DOM 上失效。改成 watch + nextTick 之后，
+ * 每次内容真正变化都会重新挂一遍增强，实时预览里的 mermaid 和复制按钮才能正常工作。
+ */
+async function enhance(el: HTMLElement) {
   // Mermaid rendering（按需加载）
   const mermaidEls = el.querySelectorAll('.mermaid')
   if (mermaidEls.length > 0 || needMermaid(props.content)) {
@@ -76,7 +82,8 @@ onMounted(async () => {
     }
   }
 
-  // Copy buttons
+  // Copy buttons（先清旧的再挂，避免重复绑定）
+  el.querySelectorAll('pre.hljs .code-copy-btn').forEach(b => b.remove())
   el.querySelectorAll('pre.hljs').forEach((pre) => {
     const codeBlock = pre.closest('.code-wrapper')
     const container = codeBlock || pre
@@ -96,6 +103,8 @@ onMounted(async () => {
 
   // Mermaid click to zoom
   el.querySelectorAll('.mermaid-wrapper').forEach(wrapper => {
+    if ((wrapper as HTMLElement).dataset.zoomBound === '1') return
+    ;(wrapper as HTMLElement).dataset.zoomBound = '1'
     wrapper.addEventListener('click', async () => {
       if (!mermaid) {
         try { await ensureMermaid() } catch { return }
@@ -115,5 +124,17 @@ onMounted(async () => {
     ;(wrapper as HTMLElement).style.cursor = 'pointer'
     wrapper.setAttribute('title', '点击放大')
   })
+}
+
+onMounted(async () => {
+  const el = contentRef.value
+  if (el) await enhance(el)
+})
+
+// 内容变化时重新挂增强：flush:'post' 保证此刻 v-html 已经更新到 DOM
+watch(() => props.content, async () => {
+  await nextTick()
+  const el = contentRef.value
+  if (el) await enhance(el)
 })
 </script>

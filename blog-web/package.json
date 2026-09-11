@@ -11,8 +11,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language-data": "^6.5.2",
     "@nuxtjs/color-mode": "^4.0.1",
     "@pinia/nuxt": "^0.5.1",
+    "codemirror": "^6.0.2",
     "dayjs": "^1.11.11",
     "highlight.js": "^11.11.1",
     "markdown-it": "^14.1.0",
