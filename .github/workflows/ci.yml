@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# 同一分支只保留最新一次运行，旧的自动取消，避免排队与重复消耗
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend (Maven test)
@@ -14,24 +19,24 @@ jobs:
       run:
         working-directory: blog-server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
       - name: Run tests
-        run: mvn test -pl blog-front-api -am
+        run: mvn -B test -pl blog-front-api -am
 
   frontend:
-    name: Frontend (Vitest + Nuxt build)
+    name: Frontend (Vitest + Typecheck + Nuxt build)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: blog-web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: npm
@@ -46,5 +51,30 @@ jobs:
         run: npx nuxi prepare
       - name: Run unit tests
         run: npm test
+      - name: Typecheck
+        # nuxi build 不会因类型错误失败。这里显式 typecheck；
+        # 历史代码 any 较多，先设为非阻塞，待逐步收敛后再去掉 continue-on-error。
+        run: npx nuxi typecheck
+        continue-on-error: true
+      - name: Dependency audit
+        # 仅扫描生产依赖的高危漏洞，先非阻塞观察
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
       - name: Build
         run: npm run build
+
+  rag:
+    name: RAG (Python syntax check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rag_system
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Compile Python sources
+        # 依赖较重（向量库/模型），CI 只做语法与导入级编译检查。
+        # 后续补 pytest 用例后再升级为真正的测试作业。
+        run: python -m compileall -q backend
