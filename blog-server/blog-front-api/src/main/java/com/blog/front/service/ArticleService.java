@@ -45,7 +45,6 @@ public class ArticleService {
     public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword, List<Long> categoryIds, String sort) {
         LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<Article>()
                 .eq(Article::getStatus, 1)
-                .eq(Article::getVisibility, 0)
                 .eq(Article::getIsDeleted, 0);
         if (categoryIds != null && !categoryIds.isEmpty()) {
             wrapper.in(Article::getCategoryId, categoryIds);
@@ -99,7 +98,7 @@ public class ArticleService {
                 Article::getCover, Article::getStatus, Article::getUserId, Article::getCategoryId,
                 Article::getSeries, Article::getIsTop, Article::getViewCount,
                 Article::getCommentCount, Article::getLikeCount, Article::getWordCount,
-                Article::getIsDeleted, Article::getIsEncrypted, Article::getVisibility,
+                Article::getIsDeleted, Article::getIsEncrypted,
                 Article::getCreateTime, Article::getUpdateTime);
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
@@ -138,8 +137,7 @@ public class ArticleService {
     }
 
     private boolean isPublicArticle(Article article) {
-        return article.getStatus() != null && article.getStatus() == 1
-                && (article.getVisibility() == null || article.getVisibility() == 0);
+        return article.getStatus() != null && article.getStatus() == 1;
     }
 
     @Transactional
@@ -155,7 +153,6 @@ public class ArticleService {
         article.setSeries(dto.getSeries());
         article.setStatus(dto.getStatus() != null ? dto.getStatus() : 0);
         article.setIsTop(dto.getIsTop() != null ? dto.getIsTop() : 0);
-        article.setVisibility(dto.getVisibility() != null ? dto.getVisibility() : 0);
         article.setWordCount(WordCounter.count(dto.getContentMd()));
         article.setUserId(userId);
         articleMapper.insert(article);
@@ -198,9 +195,6 @@ public class ArticleService {
         }
         if (dto.getIsTop() != null) {
             article.setIsTop(dto.getIsTop());
-        }
-        if (dto.getVisibility() != null) {
-            article.setVisibility(dto.getVisibility());
         }
         article.setWordCount(WordCounter.count(dto.getContentMd()));
         articleMapper.updateById(article);
@@ -271,7 +265,6 @@ public class ArticleService {
                 .select(Article::getId, Article::getTitle, Article::getCover, Article::getCreateTime)
                 .eq(Article::getCategoryId, article.getCategoryId())
                 .eq(Article::getStatus, 1)
-                .eq(Article::getVisibility, 0)
                 .eq(Article::getIsDeleted, 0)
                 .ne(Article::getId, id)
                 .orderByDesc(Article::getCreateTime)
@@ -293,7 +286,6 @@ public class ArticleService {
         List<Long> articleIds = ats.stream().map(ArticleTag::getArticleId).toList();
         return articleMapper.selectList(new LambdaQueryWrapper<Article>()
                 .eq(Article::getStatus, 1)
-                .eq(Article::getVisibility, 0)
                 .eq(Article::getIsDeleted, 0)
                 .in(Article::getId, articleIds)
                 .orderByDesc(Article::getCreateTime));

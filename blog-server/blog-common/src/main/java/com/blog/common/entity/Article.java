@@ -43,7 +43,5 @@ public class Article extends BaseEntity {
 
     private Integer isEncrypted;
 
-    private Integer visibility;
-
     private String password;
 }

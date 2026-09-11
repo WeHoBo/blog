@@ -249,7 +249,6 @@ public class ArticleController {
         List<Article> articles = articleMapper.selectList(
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
-                        .eq(Article::getVisibility, 0)
                         .eq(Article::getIsDeleted, 0)
                         .select(Article::getId, Article::getTitle, Article::getCreateTime)
                         .orderByDesc(Article::getCreateTime));
@@ -294,7 +293,6 @@ public class ArticleController {
         List<Article> articles = articleMapper.selectList(
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
-                        .eq(Article::getVisibility, 0)
                         .eq(Article::getIsDeleted, 0)
                         .isNotNull(Article::getSeries)
                         .ne(Article::getSeries, "")

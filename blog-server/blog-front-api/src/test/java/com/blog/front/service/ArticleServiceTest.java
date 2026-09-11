@@ -56,11 +56,10 @@ class ArticleServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
-    private Article article(Long id, int status, int visibility) {
+    private Article article(Long id, int status) {
         Article article = new Article();
         article.setId(id);
         article.setStatus(status);
-        article.setVisibility(visibility);
         return article;
     }
 
@@ -98,22 +97,14 @@ class ArticleServiceTest {
     @Test
     void getPublicById_throwsWhenDraft() {
         mockCacheMiss();
-        when(articleMapper.selectById(1L)).thenReturn(article(1L, 0, 0));
+        when(articleMapper.selectById(1L)).thenReturn(article(1L, 0));
         ArticleService s = service();
         assertThrows(BusinessException.class, () -> s.getPublicById(1L));
     }
 
     @Test
-    void getPublicById_throwsWhenPrivate() {
-        mockCacheMiss();
-        when(articleMapper.selectById(2L)).thenReturn(article(2L, 1, 1));
-        ArticleService s = service();
-        assertThrows(BusinessException.class, () -> s.getPublicById(2L));
-    }
-
-    @Test
     void getAdminById_returnsDraft() {
-        Article draft = article(1L, 0, 0);
+        Article draft = article(1L, 0);
         when(articleMapper.selectById(1L)).thenReturn(draft);
         ArticleService s = service();
         assertEquals(draft, s.getAdminById(1L));

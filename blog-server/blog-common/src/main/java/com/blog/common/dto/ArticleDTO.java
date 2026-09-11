@@ -34,7 +34,5 @@ public class ArticleDTO {
 
     private Integer isEncrypted;
 
-    private Integer visibility;
-
     private String password;
 }
