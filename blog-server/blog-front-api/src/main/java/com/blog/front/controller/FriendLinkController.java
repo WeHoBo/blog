@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.FriendLink;
 import com.blog.common.mapper.FriendLinkMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -27,14 +28,14 @@ public class FriendLinkController {
 
     @PreAuthorize("hasRole('admin')")
     @PostMapping
-    public Result<FriendLink> create(@RequestBody FriendLink link) {
+    public Result<FriendLink> create(@Valid @RequestBody FriendLink link) {
         friendLinkMapper.insert(link);
         return Result.ok(link);
     }
 
     @PreAuthorize("hasRole('admin')")
     @PutMapping("/{id}")
-    public Result<FriendLink> update(@PathVariable Long id, @RequestBody FriendLink link) {
+    public Result<FriendLink> update(@PathVariable Long id, @Valid @RequestBody FriendLink link) {
         link.setId(id);
         friendLinkMapper.updateById(link);
         return Result.ok(link);

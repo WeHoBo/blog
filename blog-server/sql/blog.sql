@@ -2,6 +2,7 @@ CREATE DATABASE IF NOT EXISTS blog DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4
 
 USE blog;
 
+DROP TABLE IF EXISTS operation_log;
 DROP TABLE IF EXISTS article_tag;
 DROP TABLE IF EXISTS comment;
 DROP TABLE IF EXISTS article;
@@ -20,11 +21,19 @@ CREATE TABLE user (
     avatar      VARCHAR(500) DEFAULT NULL COMMENT '头像',
     email       VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
     role        VARCHAR(20)  DEFAULT 'user' COMMENT '角色 admin/user',
+    github_id   VARCHAR(50)  DEFAULT NULL COMMENT 'GitHub openId',
+    gitee_id    VARCHAR(50)  DEFAULT NULL COMMENT 'Gitee openId',
+    huawei_id   VARCHAR(100) DEFAULT NULL COMMENT '华为 openId',
+    source      VARCHAR(20)  DEFAULT 'local' COMMENT '注册来源 local/github/gitee/huawei',
     status      TINYINT      DEFAULT 1 COMMENT '状态 0禁用 1启用',
     create_time DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_username (username)
+    UNIQUE KEY uk_username (username),
+    -- 第三方账号唯一，防止并发回调为同一 openId 创建重复用户（MySQL 唯一索引允许多行 NULL）
+    UNIQUE KEY uk_github_id (github_id),
+    UNIQUE KEY uk_gitee_id (gitee_id),
+    UNIQUE KEY uk_huawei_id (huawei_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
 
 -- 分类表
@@ -64,10 +73,12 @@ CREATE TABLE article (
     status        TINYINT       DEFAULT 0 COMMENT '状态 0草稿 1已发布 2回收站',
     user_id       BIGINT        NOT NULL COMMENT '作者ID',
     category_id   BIGINT        DEFAULT NULL COMMENT '分类ID',
+    series        VARCHAR(100)  DEFAULT NULL COMMENT '文章系列名',
     is_top        TINYINT       DEFAULT 0 COMMENT '是否置顶',
     view_count    INT           DEFAULT 0 COMMENT '浏览量',
     comment_count INT           DEFAULT 0 COMMENT '评论数',
     like_count    INT           DEFAULT 0 COMMENT '点赞数',
+    word_count    INT           DEFAULT 0 COMMENT '字数',
     is_deleted    TINYINT       DEFAULT 0 COMMENT '逻辑删除 0否 1是',
     create_time   DATETIME      DEFAULT CURRENT_TIMESTAMP,
     update_time   DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -75,14 +86,18 @@ CREATE TABLE article (
     UNIQUE KEY uk_slug (slug),
     KEY idx_category (category_id),
     KEY idx_user (user_id),
-    KEY idx_create_time (create_time)
+    KEY idx_create_time (create_time),
+    -- 列表查询固定过滤 status + is_deleted，并按 is_top / create_time 排序
+    KEY idx_list (status, is_deleted, is_top, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文章表';
 
 -- 文章标签关联表
 CREATE TABLE article_tag (
     article_id BIGINT NOT NULL,
     tag_id     BIGINT NOT NULL,
-    PRIMARY KEY (article_id, tag_id)
+    PRIMARY KEY (article_id, tag_id),
+    -- 主键最左前缀是 article_id，按 tag_id 反查文章需要单列索引
+    KEY idx_tag (tag_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文章标签关联表';
 
 -- 评论表
@@ -124,3 +139,16 @@ CREATE TABLE friend_link (
     update_time DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='友链表';
+
+-- 操作日志表
+CREATE TABLE operation_log (
+    id          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    user_id     BIGINT       DEFAULT NULL COMMENT '操作人ID',
+    action      VARCHAR(255) DEFAULT NULL COMMENT '操作内容',
+    target_id   BIGINT       DEFAULT NULL COMMENT '目标ID',
+    target_type VARCHAR(50)  DEFAULT NULL COMMENT '目标类型',
+    create_time DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    KEY idx_create_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='操作日志';

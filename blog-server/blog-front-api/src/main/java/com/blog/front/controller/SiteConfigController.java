@@ -1,8 +1,10 @@
 package com.blog.front.controller;
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.SiteConfig;
+import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.SiteConfigMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -16,6 +18,12 @@ import java.util.Map;
 @RequestMapping("/api/site-config")
 @RequiredArgsConstructor
 public class SiteConfigController {
+
+    /** 与 site_config.config_key VARCHAR(100) 保持一致 */
+    private static final int MAX_KEY_LENGTH = 100;
+
+    /** config_value 为 TEXT（约 64KB），这里再收紧一档，避免异常大的内容入库 */
+    private static final int MAX_VALUE_LENGTH = 20000;
 
     private final SiteConfigMapper siteConfigMapper;
 
@@ -41,16 +49,27 @@ public class SiteConfigController {
     @PreAuthorize("hasRole('admin')")
     @PostMapping("/save")
     public Result<?> save(@RequestBody Map<String, String> configs) {
+        if (configs == null || configs.isEmpty()) {
+            return Result.ok();
+        }
         for (Map.Entry<String, String> entry : configs.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (StrUtil.isBlank(key) || key.length() > MAX_KEY_LENGTH) {
+                throw new BusinessException("配置项名称不合法: " + key);
+            }
+            if (value != null && value.length() > MAX_VALUE_LENGTH) {
+                throw new BusinessException("配置项 " + key + " 内容过长（上限 " + MAX_VALUE_LENGTH + " 字）");
+            }
             SiteConfig exist = siteConfigMapper.selectOne(
-                    new LambdaQueryWrapper<SiteConfig>().eq(SiteConfig::getConfigKey, entry.getKey()));
+                    new LambdaQueryWrapper<SiteConfig>().eq(SiteConfig::getConfigKey, key));
             if (exist != null) {
-                exist.setConfigValue(entry.getValue());
+                exist.setConfigValue(value);
                 siteConfigMapper.updateById(exist);
             } else {
                 SiteConfig c = new SiteConfig();
-                c.setConfigKey(entry.getKey());
-                c.setConfigValue(entry.getValue());
+                c.setConfigKey(key);
+                c.setConfigValue(value);
                 siteConfigMapper.insert(c);
             }
         }

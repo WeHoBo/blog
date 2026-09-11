@@ -40,7 +40,12 @@ public class WordCountMigrator implements ApplicationRunner {
             }
             backfill(conn);
         } catch (Exception e) {
-            log.warn("word_count migration failed: {}", e.getMessage());
+            // 必须快速失败：article.word_count 列缺失会让所有文章查询直接 500，
+            // 静默放行只会把「启动成功」的假象拖到线上大面积报错时才暴露。
+            // 若确因数据库账号无 ALTER 权限，请先手工执行 blog-server/sql 下的建表/变更脚本。
+            throw new IllegalStateException(
+                    "数据库结构迁移失败（article.word_count / user.huawei_id），请检查数据库账号权限或手工执行 sql 脚本: "
+                            + e.getMessage(), e);
         }
     }
 

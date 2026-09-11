@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.Tag;
 import com.blog.common.mapper.TagMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +25,7 @@ public class TagController {
 
     @PreAuthorize("hasRole('admin')")
     @PostMapping
-    public Result<Tag> create(@RequestBody Tag tag) {
+    public Result<Tag> create(@Valid @RequestBody Tag tag) {
         if (StrUtil.isBlank(tag.getSlug())) {
             tag.setSlug(tag.getName());
         }
@@ -34,7 +35,7 @@ public class TagController {
 
     @PreAuthorize("hasRole('admin')")
     @PutMapping("/{id}")
-    public Result<Tag> update(@PathVariable Long id, @RequestBody Tag tag) {
+    public Result<Tag> update(@PathVariable Long id, @Valid @RequestBody Tag tag) {
         tag.setId(id);
         tagMapper.updateById(tag);
         return Result.ok(tag);

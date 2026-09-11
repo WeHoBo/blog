@@ -15,6 +15,7 @@ import com.blog.front.service.ArticleService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -36,10 +38,46 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ArticleController {
 
+    /** 归档 / 系列聚合结果缓存 */
+    private static final String CACHE_KEY_ARCHIVE = "article:archive";
+    private static final String CACHE_KEY_SERIES = "article:series";
+    private static final Duration AGG_CACHE_TTL = Duration.ofMinutes(10);
+
     private final ArticleService articleService;
     private final CategoryMapper categoryMapper;
     private final ArticleMapper articleMapper;
     private final UserMapper userMapper;
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    /**
+     * 读取聚合缓存。Redis 不可用时静默降级为「无缓存直查」，
+     * 不让缓存故障影响这两个只读接口的可用性。
+     */
+    @SuppressWarnings("unchecked")
+    private <T> T readAggCache(String key) {
+        try {
+            return (T) redisTemplate.opsForValue().get(key);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void writeAggCache(String key, Object value) {
+        try {
+            redisTemplate.opsForValue().set(key, value, AGG_CACHE_TTL);
+        } catch (Exception ignored) {
+            // 缓存写入失败不影响接口返回
+        }
+    }
+
+    /** 文章变更后让归档 / 系列聚合缓存失效 */
+    private void evictAggCache() {
+        try {
+            redisTemplate.delete(List.of(CACHE_KEY_ARCHIVE, CACHE_KEY_SERIES));
+        } catch (Exception ignored) {
+            // 缓存失效失败时等待 TTL 自然过期
+        }
+    }
 
     private boolean isAdmin() {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -175,19 +213,24 @@ public class ArticleController {
     @PostMapping
     public Result<Article> create(@Valid @RequestBody ArticleDTO dto) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        return Result.ok(articleService.create(dto, userId));
+        Article created = articleService.create(dto, userId);
+        evictAggCache();
+        return Result.ok(created);
     }
 
     @PreAuthorize("hasRole('admin')")
     @PutMapping("/{id}")
     public Result<Article> update(@PathVariable Long id, @Valid @RequestBody ArticleDTO dto) {
-        return Result.ok(articleService.update(id, dto));
+        Article updated = articleService.update(id, dto);
+        evictAggCache();
+        return Result.ok(updated);
     }
 
     @PreAuthorize("hasRole('admin')")
     @DeleteMapping("/{id}")
     public Result<?> delete(@PathVariable Long id) {
         articleService.delete(id);
+        evictAggCache();
         return Result.ok();
     }
 
@@ -211,6 +254,7 @@ public class ArticleController {
         for (Long id : ids) {
             articleService.delete(id);
         }
+        evictAggCache();
         return Result.ok();
     }
 
@@ -246,6 +290,10 @@ public class ArticleController {
 
     @GetMapping("/archive")
     public Result<Map<String, Object>> archive() {
+        Map<String, Object> cached = readAggCache(CACHE_KEY_ARCHIVE);
+        if (cached != null) {
+            return Result.ok(cached);
+        }
         List<Article> articles = articleMapper.selectList(
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
@@ -285,11 +333,16 @@ public class ArticleController {
             yearList.add(yearItem);
         }
         result.put("archives", yearList);
+        writeAggCache(CACHE_KEY_ARCHIVE, result);
         return Result.ok(result);
     }
 
     @GetMapping("/series")
     public Result<List<Map<String, Object>>> seriesList() {
+        List<Map<String, Object>> cached = readAggCache(CACHE_KEY_SERIES);
+        if (cached != null) {
+            return Result.ok(cached);
+        }
         List<Article> articles = articleMapper.selectList(
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
@@ -309,6 +362,7 @@ public class ArticleController {
             item.put("count", e.getValue());
             result.add(item);
         }
+        writeAggCache(CACHE_KEY_SERIES, result);
         return Result.ok(result);
     }
 }

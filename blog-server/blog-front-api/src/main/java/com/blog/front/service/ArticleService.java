@@ -14,6 +14,7 @@ import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.ArticleTagMapper;
 import com.blog.common.mapper.CategoryMapper;
 import com.blog.common.mapper.TagMapper;
+import com.blog.common.vo.TagArticleCount;
 import com.blog.front.util.DocxToMdUtil;
 import com.blog.front.util.WordCounter;
 import lombok.RequiredArgsConstructor;
@@ -24,12 +25,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -65,7 +63,10 @@ public class ArticleService {
             }
         }
         if ("title".equals(sort)) {
-            wrapper.last("ORDER BY is_top DESC, CAST(title AS UNSIGNED) ASC, title ASC");
+            // 标题正序。原先用 CAST(title AS UNSIGNED)，非纯数字标题一律被转成 0，
+            // 排序结果错乱（中文标题全部并列）。这里回归可预期的字符串排序。
+            wrapper.orderByDesc(Article::getIsTop)
+                    .orderByAsc(Article::getTitle);
         } else {
             wrapper.orderByDesc(Article::getIsTop)
                     .orderByDesc(Article::getCreateTime);
@@ -105,6 +106,8 @@ public class ArticleService {
 
     public Article getPublicById(Long id) {
         String key = "article:" + id;
+        // 本次缓存窗口内的浏览量增量（与文章缓存同 TTL，过期即重置）
+        String viewKey = "article:view:" + id;
         Article article = (Article) redisTemplate.opsForValue().get(key);
         if (article == null) {
             article = articleMapper.selectById(id);
@@ -112,19 +115,20 @@ public class ArticleService {
                 throw new BusinessException(404, "文章不存在");
             }
             redisTemplate.opsForValue().set(key, article, Duration.ofMinutes(10));
+            redisTemplate.opsForValue().set(viewKey, 0, Duration.ofMinutes(10));
         } else if (!isPublicArticle(article)) {
             redisTemplate.delete(key);
             throw new BusinessException(404, "文章不存在");
         }
+        // 持久化：单条主键 UPDATE 原子自增（数据库始终是浏览量的真实来源）
         articleMapper.update(null, new LambdaUpdateWrapper<Article>()
                 .eq(Article::getId, id)
                 .setSql("view_count = IFNULL(view_count, 0) + 1"));
-        Article countRow = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
-                .select(Article::getViewCount)
-                .eq(Article::getId, id));
-        if (countRow != null && countRow.getViewCount() != null) {
-            article.setViewCount(countRow.getViewCount());
-        }
+        // 展示：用 Redis 计数器自增，免去每次访问都回查一次数据库
+        // 展示值 = 缓存加载时的 DB 基准值 + 窗口内增量，与数据库保持同步
+        Long delta = redisTemplate.opsForValue().increment(viewKey);
+        article.setViewCount((article.getViewCount() == null ? 0 : article.getViewCount())
+                + (delta == null ? 1 : delta.intValue()));
         return article;
     }
 
@@ -238,19 +242,14 @@ public class ArticleService {
 
     public List<Tag> listTags() {
         List<Tag> tags = tagMapper.selectList(null);
-        Set<Long> publishedIds = articleMapper.selectList(new LambdaQueryWrapper<Article>()
-                        .eq(Article::getStatus, 1)
-                        .eq(Article::getIsDeleted, 0)
-                        .select(Article::getId))
-                .stream().map(Article::getId).collect(Collectors.toCollection(HashSet::new));
-        List<ArticleTag> ats = articleTagMapper.selectList(null).stream()
-                .filter(at -> publishedIds.contains(at.getArticleId()))
-                .toList();
-        Map<Long, Long> countMap = ats.stream().collect(Collectors.groupingBy(
-                ArticleTag::getTagId, Collectors.counting()));
+        // 一条聚合 SQL 统计各标签下已发布文章数，
+        // 替代原先「全量载入 article + article_tag 后在内存里分组」的做法
+        Map<Long, Long> countMap = articleTagMapper.countPublishedByTag().stream()
+                .filter(r -> r.getTagId() != null)
+                .collect(Collectors.toMap(TagArticleCount::getTagId,
+                        r -> r.getCnt() == null ? 0L : r.getCnt()));
         for (Tag tag : tags) {
-            Long c = countMap.get(tag.getId());
-            tag.setArticleCount(c == null ? 0 : c.intValue());
+            tag.setArticleCount(countMap.getOrDefault(tag.getId(), 0L).intValue());
         }
         return tags;
     }
@@ -277,18 +276,6 @@ public class ArticleService {
         if (ats.isEmpty()) return List.of();
         List<Long> tagIds = ats.stream().map(ArticleTag::getTagId).toList();
         return tagMapper.selectBatchIds(tagIds);
-    }
-
-    public List<Article> getArticlesByTagId(Long tagId) {
-        List<ArticleTag> ats = articleTagMapper.selectList(
-                new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getTagId, tagId));
-        if (ats.isEmpty()) return List.of();
-        List<Long> articleIds = ats.stream().map(ArticleTag::getArticleId).toList();
-        return articleMapper.selectList(new LambdaQueryWrapper<Article>()
-                .eq(Article::getStatus, 1)
-                .eq(Article::getIsDeleted, 0)
-                .in(Article::getId, articleIds)
-                .orderByDesc(Article::getCreateTime));
     }
 
     @Transactional
