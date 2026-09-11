@@ -12,10 +12,10 @@
         </div>
       </div>
       <div class="p-4 flex-1 flex flex-col">
-        <h3 class="text-2xl font-extrabold text-gray-900 dark:text-gray-100 line-clamp-2 title-hover transition-colors">
+        <h2 class="text-2xl font-extrabold text-gray-900 dark:text-gray-100 line-clamp-2 title-hover transition-colors">
           <span v-if="article.isTop" class="inline-block text-xs bg-red-500 text-white px-1.5 py-0.5 rounded mr-1.5 align-middle">置顶</span>
           {{ article.title }}
-        </h3>
+        </h2>
         <div class="mt-3 flex items-center gap-3 text-xs text-gray-400 mt-auto pt-2">
           <span>{{ article.createTime?.substring(0, 10) }}</span>
           <span>{{ article.viewCount }} 阅读</span>

@@ -3,7 +3,7 @@
     <h1 class="text-3xl font-extrabold text-gray-900 dark:text-gray-100 mb-8">关于</h1>
     
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-8 mb-8">
-      <div v-if="aboutContent" class="article-content prose dark:prose-invert max-w-none" v-html="renderedAbout"></div>
+      <div v-if="aboutContent" class="article-content max-w-none" v-html="renderedAbout"></div>
       <div v-else class="text-gray-500 dark:text-gray-400 leading-relaxed">
         <p>你好，欢迎来到{{ siteName }}。这里记录了我的技术思考、编程心得和学习笔记。</p>
         <p class="mt-4">技术栈：Java / SpringBoot / Vue / Nuxt / MySQL / Redis</p>
@@ -14,7 +14,7 @@
     <div v-if="links.length === 0" class="text-gray-400 text-sm">暂无友链</div>
     <div v-else class="grid gap-3 sm:grid-cols-2">
       <a v-for="link in links" :key="link.id" :href="fixUrl(link.url)" target="_blank" rel="noopener" class="flex items-center gap-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 hover:shadow-md transition group">
-        <img v-if="link.avatar" :src="link.avatar" class="w-10 h-10 rounded-full object-cover" />
+        <img v-if="link.avatar" :src="link.avatar" :alt="link.name" class="w-10 h-10 rounded-full object-cover" />
         <div v-else class="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold text-sm">{{ link.name[0] }}</div>
         <div>
           <div class="font-medium text-gray-900 dark:text-gray-100 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition text-sm">{{ link.name }}</div>

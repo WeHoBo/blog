@@ -41,8 +41,8 @@
       <!-- Right: Form -->
       <div class="p-8 sm:p-12 flex flex-col">
         <div class="mb-8">
-          <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">登录账号</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">选择你的登录方式</p>
+          <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">登录 / 注册</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">使用第三方账号，首次登录将自动注册</p>
         </div>
 
         <!-- OAuth -->
@@ -81,6 +81,11 @@ onMounted(() => {
   if (!ctx) return
   canvas.width = window.innerWidth
   canvas.height = window.innerHeight
+  // 粒子颜色跟随主题色变量（默认 hue 217 时 ≈ 原来的 #60a5fa）
+  const rootStyle = getComputedStyle(document.documentElement)
+  const ph = rootStyle.getPropertyValue('--ph').trim() || '217'
+  const ps = rootStyle.getPropertyValue('--ps').trim() || '91%'
+  const particleColor = `hsl(${ph} ${ps} 60%)`
   const particles: any[] = []
   for (let i = 0; i < 50; i++) {
     particles.push({
@@ -90,7 +95,7 @@ onMounted(() => {
   }
   function draw() {
     ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
-    ctx!.fillStyle = '#60a5fa'
+    ctx!.fillStyle = particleColor
     for (const p of particles) {
       ctx!.beginPath(); ctx!.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx!.fill()
       p.x += p.dx; p.y += p.dy

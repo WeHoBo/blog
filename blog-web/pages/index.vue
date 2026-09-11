@@ -143,6 +143,35 @@
         </div>
 
         <Pagination v-if="totalPages > 1" :current="pageNum" :total="totalPages" @change="pageNum = $event" />
+
+        <!-- 右侧栏在 xl 以下会被隐藏：这里补一个可折叠的替代入口，避免窄屏完全看不到热门内容 -->
+        <div class="xl:hidden mt-8">
+          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+            <button @click="mobileAsideOpen = !mobileAsideOpen"
+              class="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+              <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门内容</h3>
+              <svg class="w-4 h-4 text-gray-400 transition-transform duration-200" :class="mobileAsideOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div v-show="mobileAsideOpen" class="px-4 pb-4">
+              <!-- 热门文章 -->
+              <div v-if="hotArticles.length" class="space-y-1 mb-3">
+                <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="`/article/${a.id}`"
+                  class="flex items-start gap-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
+                  <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
+                  <span class="flex-1 min-w-0 text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug">{{ a.title }}</span>
+                </NuxtLink>
+              </div>
+              <!-- 热门标签 -->
+              <div v-if="hotTags.length" class="flex flex-wrap gap-1.5 pt-3 border-t dark:border-gray-700">
+                <NuxtLink v-for="t in hotTags" :key="t.id" :to="`/?tagId=${t.id}`"
+                  class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
+                  {{ t.name }}
+                  <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
+                </NuxtLink>
+              </div>
+            </div>
+          </div>
+        </div>
       </main>
 
       <!-- Right sidebar -->
@@ -305,8 +334,7 @@ const CAT_ICONS: [string, string][] = [
   ['网络', '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="1.8"/><path stroke-width="1.8" d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" fill="none"/></svg>'],
   ['数据库', '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="2.8" stroke-width="1.8"/><path stroke-width="1.8" d="M4 5.5V18.5c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5" fill="none"/><path stroke-width="1.8" d="M4 12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8" fill="none"/></svg>'],
   ['课程', '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linejoin="round" stroke-width="1.8" d="M4 19.5A2.5 2.5 0 016.5 17H20V3H6.5A2.5 2.5 0 004 5.5z" fill="none" stroke-linecap="round"/><path stroke-width="1.8" d="M4 19.5A2.5 2.5 0 016.5 17H20" fill="none" stroke-linecap="round"/></svg>'],
-  ['科普', '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linejoin="round" stroke-width="1.8" d="M9 18h6M10 22h4M12 2a7 7 0 00-4.5 12.4c.6.5 1.5 1.6 1.5 2.6h6c0-1 .9-2.1 1.5-2.6A7 7 0 0012 2z" fill="none" stroke-linecap="round"/></svg>'],
-  ['Docker', '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 13h1.5M6.5 13H8m-5-3h1.5M6.5 10H8m-2.5-3H7m5 6h9a5 5 0 01-5 5c-3.5 0-6-1.5-6-5z"/><path stroke-width="1.8" d="M4 13c0 3.5 2.5 5.5 6 5.5" fill="none" stroke-linecap="round"/></svg>']
+  ['科普', '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linejoin="round" stroke-width="1.8" d="M9 18h6M10 22h4M12 2a7 7 0 00-4.5 12.4c.6.5 1.5 1.6 1.5 2.6h6c0-1 .9-2.1 1.5-2.6A7 7 0 0012 2z" fill="none" stroke-linecap="round"/></svg>']
 ]
 function catIcon(name: string) {
   const hit = CAT_ICONS.find(([k]) => (name || '').includes(k))

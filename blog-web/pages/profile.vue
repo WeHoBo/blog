@@ -48,6 +48,7 @@ definePageMeta({ middleware: 'auth' })
 const authStore = useAuthStore()
 const { put } = useApi()
 const { upload } = useUpload()
+const { toast } = useFeedback()
 
 const form = reactive({
   nickname: authStore.user?.nickname || '',
@@ -65,8 +66,9 @@ async function uploadAvatar(e: Event) {
   avatarUploading.value = true
   try {
     form.avatar = await upload(file)
+    toast('头像上传成功', 'success')
   } catch (e: any) {
-    alert('头像上传失败: ' + (e.message || ''))
+    toast('头像上传失败: ' + (e.message || ''), 'error')
   } finally {
     avatarUploading.value = false
   }

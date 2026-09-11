@@ -60,6 +60,8 @@
           </div>
         </article>
 
+      <!-- 文章正文之外的所有区块：仅在文章成功加载后渲染（避免 404/加载中时出现空评论区等诡异内容） -->
+      <template v-if="currentArticle">
       <!-- Prev/Next -->
       <div class="mt-10 flex justify-between gap-4 max-w-3xl mx-auto">
         <NuxtLink v-if="prevArticle" :to="`/article/${prevArticle.id}`" class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 hover:shadow-md transition group">
@@ -116,7 +118,7 @@
                 </div>
               </div>
 
-              <div v-if="authStore.isLoggedIn" class="bg-gray-50 dark:bg-gray-750 rounded-lg p-4">
+              <div v-if="authStore.isLoggedIn" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
                 <textarea v-model="commentText" rows="3" placeholder="写下你的评论..." class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"></textarea>
                 <div class="flex justify-between items-center mt-3">
                   <span class="text-xs text-gray-400">{{ commentText.length }}/500</span>
@@ -149,6 +151,7 @@
             </div>
           </div>
         </div>
+      </template>
       </main>
     </div>
 

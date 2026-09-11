@@ -1,6 +1,6 @@
 ﻿<template>
   <header
-    class="fixed top-0 inset-x-0 z-50 transition-all duration-300 border-b backdrop-blur-xl bg-pink-50/80 dark:bg-gray-900/80 dark:border-gray-800 rounded-b-2xl shadow-sm"
+    class="fixed top-0 inset-x-0 z-50 transition-all duration-300 border-b backdrop-blur-xl bg-white/80 dark:bg-gray-900/80 dark:border-gray-800 rounded-b-2xl shadow-sm"
     :class="hidden ? '-translate-y-full' : 'translate-y-0'"
   >
     <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
@@ -87,7 +87,7 @@
       <Transition name="modal">
         <div v-if="settingsOpen" class="fixed inset-0 z-[60] flex items-center justify-center p-4" @click.self="settingsOpen = false">
           <div class="absolute inset-0 bg-black/20" @click="settingsOpen = false"></div>
-          <div class="relative w-full max-w-sm rounded-2xl shadow-2xl border border-primary-100 dark:border-gray-700 bg-pink-50/95 dark:bg-gray-900/95 backdrop-blur-xl p-6">
+          <div class="relative w-full max-w-sm rounded-2xl shadow-2xl border border-primary-100 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl p-6">
             <div class="flex items-center justify-between mb-5">
               <h3 class="text-lg font-bold text-gray-900 dark:text-white">⚙️ 设置</h3>
               <button @click="settingsOpen = false" class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-primary-100/70 dark:hover:bg-primary-500/20 hover:text-gray-600 dark:hover:text-gray-200 transition text-xl">✕</button>
@@ -158,6 +158,7 @@ const userOpen = ref(false)
 
 const hidden = ref(false)
 let lastScrollY = 0
+let scrollRafId = 0
 
 function handleLogout() {
   userOpen.value = false
@@ -165,16 +166,33 @@ function handleLogout() {
   router.push('/')
 }
 
+// Ctrl+K / Cmd+K 聚焦搜索框（独立命名，便于卸载时移除）
+function handleHotkey(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    searchInput.value?.focus()
+  }
+}
+
+function handleScroll() {
+  // rAF 节流：滚动事件频率极高，直接写响应式数据会导致持续的整页重渲染
+  if (scrollRafId) return
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = 0
+    const y = window.scrollY
+    if (y > lastScrollY && y > 60) {
+      hidden.value = true
+    } else if (y < lastScrollY) {
+      hidden.value = false
+    }
+    lastScrollY = y
+  })
+}
+
 onMounted(() => {
   lastScrollY = window.scrollY
   window.addEventListener('scroll', handleScroll, { passive: true })
-  // Ctrl+K / Cmd+K 聚焦搜索框
-  window.addEventListener('keydown', (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault()
-      searchInput.value?.focus()
-    }
-  })
+  window.addEventListener('keydown', handleHotkey)
   const saved = localStorage.getItem('accent-hue')
   if (saved) { accentHue.value = Number(saved); applyHue(Number(saved)) }
   const w = localStorage.getItem('bg-warmth')
@@ -183,17 +201,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('keydown', handleHotkey)
+  if (scrollRafId) cancelAnimationFrame(scrollRafId)
 })
-
-function handleScroll() {
-  const y = window.scrollY
-  if (y > lastScrollY && y > 60) {
-    hidden.value = true
-  } else if (y < lastScrollY) {
-    hidden.value = false
-  }
-  lastScrollY = y
-}
 
 function toggleColor() {
   colorMode.preference = colorMode.preference === 'dark' ? 'light' : 'dark'

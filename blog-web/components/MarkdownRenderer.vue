@@ -84,6 +84,7 @@ onMounted(async () => {
 
     const btn = document.createElement('button')
     btn.className = 'code-copy-btn'; btn.textContent = '复制'
+    btn.setAttribute('aria-label', '复制代码')
     btn.onclick = () => {
       const code = pre.querySelector('code')?.textContent || ''
       const copy = () => { btn.textContent = '✓'; setTimeout(() => btn.textContent = '复制', 2000) }
@@ -101,7 +102,7 @@ onMounted(async () => {
       }
       const div = document.createElement('div')
       div.className = 'fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-8'
-      div.innerHTML = '<div class="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-4xl max-h-full overflow-auto"><button class="absolute top-4 right-4 text-2xl text-gray-500 hover:text-gray-800 dark:hover:text-white">&times;</button></div>'
+      div.innerHTML = '<div class="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-4xl max-h-full overflow-auto"><button aria-label="关闭" class="absolute top-4 right-4 text-2xl text-gray-500 hover:text-gray-800 dark:hover:text-white">&times;</button></div>'
       const clone = (wrapper.querySelector('.mermaid') as HTMLElement).cloneNode(true) as HTMLElement
       clone.style.transform = 'scale(1.2)'
       const box = div.querySelector('div')!

@@ -19,6 +19,18 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
 }
 
+/* 全站键盘焦点可见性：Tab 导航时能看清当前焦点位置（无障碍） */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+/* 输入类控件本身已有 ring / border 反馈，避免双重描边 */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
 /* 主题色工具类（跟随 🎨 滑块） */
 .theme-bar { background: var(--primary); }
 .theme-text { color: var(--primary-dark); }
@@ -227,15 +239,9 @@ pre.hljs:hover .code-copy-btn { opacity: 1; }
   scroll-behavior: auto;
 }
 
-/* Code block language label */
+/* Code block language label：完整样式统一在上方的 .code-lang-label 定义（含 .dark 变体）。
+   这里只保证 .code-wrapper 是定位父元素 —— 重复定义会导致浅色样式被后面的深色覆盖。 */
 .code-wrapper { position: relative; }
-.code-lang-label {
-  position: absolute; top: 0; left: 8px;
-  padding: 1px 8px; font-size: 10px;
-  background: #1e293b; color: #94a3b8;
-  border-radius: 0 0 6px 6px; z-index: 1;
-  text-transform: uppercase; letter-spacing: 0.5px;
-}
 
 /* Like heart float animation */
 @keyframes floatUp {
@@ -273,7 +279,10 @@ pre.hljs:hover .code-copy-btn { opacity: 1; }
   border-color: rgba(255,255,255,0.06);
 }
 
-/* Neon glow text */
+/* Neon glow text：浅色模式也需要定义，否则该 class 在浅色下完全无效 */
+.neon-glow {
+  text-shadow: 0 0 6px hsla(var(--ph), var(--ps), var(--pl), 0.30);
+}
 .dark .neon-glow {
   text-shadow: 0 0 7px rgba(59,130,246,0.5), 0 0 20px rgba(59,130,246,0.2);
 }
