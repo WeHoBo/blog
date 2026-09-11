@@ -155,7 +155,7 @@
             <div v-show="mobileAsideOpen" class="px-4 pb-4">
               <!-- 热门文章 -->
               <div v-if="hotArticles.length" class="space-y-1 mb-3">
-                <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="`/article/${a.id}`"
+                <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="a.slug ? `/post/${a.slug}` : `/article/${a.id}`"
                   class="flex items-start gap-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
                   <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
                   <span class="flex-1 min-w-0 text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug">{{ a.title }}</span>
@@ -205,7 +205,7 @@
               <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门文章</h3>
             </div>
             <div class="p-3 space-y-1">
-              <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="`/article/${a.id}`" class="flex items-start gap-2 py-2 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
+              <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="a.slug ? `/post/${a.slug}` : `/article/${a.id}`" class="flex items-start gap-2 py-2 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
                 <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
                 <span class="flex-1 min-w-0">
                   <span class="text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug hover:text-primary-600 dark:hover:text-primary-400 transition">{{ a.title }}</span>
@@ -385,47 +385,61 @@ const hotTags = computed(() =>
   [...tags.value].sort((a: any, b: any) => (b.articleCount || 0) - (a.articleCount || 0)).slice(0, 8)
 )
 
+/** 拉取文章列表（只返回数据，便于首屏 SSR 序列化复用） */
+async function loadArticles(): Promise<{ records: any[]; pages: number }> {
+  const params = new URLSearchParams({ pageNum: String(pageNum.value), pageSize: String(15) })
+  if (currentCategory.value) params.set('categoryId', String(currentCategory.value))
+  if (currentTag.value) params.set('tagId', String(currentTag.value))
+  if (keyword.value) params.set('keyword', keyword.value)
+  if (sortMode.value) params.set('sort', sortMode.value)
+  const res = await get<any>(`/article/list?${params.toString()}`)
+  if (res?.code === 200 && res.data) {
+    return { records: res.data.records || [], pages: res.data.pages || 0 }
+  }
+  return { records: [], pages: 0 }
+}
+
+/** 用户翻页 / 切换筛选时的增量加载（首屏由下方 useAsyncData 负责） */
 async function fetchArticles() {
   loading.value = true
   try {
-    const params = new URLSearchParams({ pageNum: String(pageNum.value), pageSize: String(15) })
-    if (currentCategory.value) params.set('categoryId', String(currentCategory.value))
-    if (currentTag.value) params.set('tagId', String(currentTag.value))
-    if (keyword.value) params.set('keyword', keyword.value)
-    if (sortMode.value) params.set('sort', sortMode.value)
-    const res = await get<any>(`/article/list?${params.toString()}`)
-    if (res.code === 200 && res.data) {
-      articles.value = res.data.records || []
-      totalPages.value = res.data.pages || 0
-    }
-  } catch { /* SSR/网络异常不阻塞页面 */ } finally { loading.value = false }
+    const { records, pages } = await loadArticles()
+    articles.value = records
+    totalPages.value = pages
+  } catch { /* 网络异常不阻塞页面 */ } finally { loading.value = false }
 }
 
-async function fetchCategories() {
-  try {
-    const res = await get<any>('/category/list')
-    if (res.code === 200) {
-      categoryList.value = res.data || []
-      categoryTree.value = buildCategoryTree(res.data || [])
-    }
-  } catch { /* 容错 */ }
-}
+// 首屏数据在服务端取好：Nuxt payload 会把它序列化给客户端，hydration 时不再重复请求；
+// 同时爬虫/用户拿到的首屏 HTML 里就带有文章列表（此前 init() 是「发射后不管」，首屏只有骨架屏 + 客户端请求两次）。
+const { data: homeInit } = await useAsyncData('home-init', async () => {
+  const [catRes, tagRes, hotRes, art] = await Promise.all([
+    get<any>('/category/list').catch(() => null),
+    get<any>('/article/tags').catch(() => null),
+    get<any>('/article/list?pageSize=5').catch(() => null),
+    loadArticles().catch(() => ({ records: [], pages: 0 }))
+  ])
+  const categories: any[] = catRes?.code === 200 ? (catRes.data || []) : []
+  const hot: any[] = hotRes?.code === 200 ? (hotRes.data?.records || []) : []
+  return {
+    categories,
+    tags: tagRes?.code === 200 ? (tagRes.data || []) : [],
+    hotArticles: [...hot].sort((a: any, b: any) => b.viewCount - a.viewCount).slice(0, 5),
+    articles: art.records,
+    totalPages: art.pages
+  }
+})
 
-async function fetchTags() {
-  try {
-    const res = await get<any>('/article/tags')
-    if (res.code === 200) tags.value = res.data || []
-  } catch { /* 容错 */ }
+// 用 payload 初始化响应式状态：服务端与客户端 hydration 得到同一份数据，避免内容闪烁与 hydration mismatch
+if (homeInit.value) {
+  const d = homeInit.value
+  categoryList.value = d.categories
+  categoryTree.value = buildCategoryTree(d.categories)
+  tags.value = d.tags
+  hotArticles.value = d.hotArticles
+  articles.value = d.articles
+  totalPages.value = d.totalPages
 }
-
-async function fetchHotArticles() {
-  try {
-    const res = await get<any>('/article/list?pageSize=5')
-    if (res.code === 200 && res.data) {
-      hotArticles.value = (res.data.records || []).sort((a: any, b: any) => b.viewCount - a.viewCount).slice(0, 5)
-    }
-  } catch { /* 容错 */ }
-}
+loading.value = false
 
 watch([pageNum, currentCategory, currentTag], () => { keyword.value = ''; fetchArticles() })
 watch(sortMode, () => { pageNum.value = 1; fetchArticles() })
@@ -444,12 +458,13 @@ watch(() => route.query.tagId, (val) => {
   fetchArticles()
 })
 
-async function init() {
-  await fetchCategories()
-  await Promise.all([fetchTags(), fetchHotArticles()])
-  fetchArticles()
-}
-init()
-
-useSeoMeta({ title: '好啵博客', description: '一个程序员的个人技术博客' })
+useSeoMeta({
+  title: '好啵博客 - codeup.asia',
+  description: '一个程序员的个人技术博客：记录 Java / SpringBoot / Vue / Nuxt / Python / Linux / Docker 等技术思考、编程心得与学习笔记。',
+  ogTitle: '好啵博客 - codeup.asia',
+  ogDescription: '一个程序员的个人技术博客，记录技术思考与编程心得。',
+  ogImage: 'https://codeup.asia/apple-touch-icon.png',
+  ogType: 'website'
+})
+useHead({ link: [{ rel: 'canonical', href: 'https://codeup.asia/' }] })
 </script>

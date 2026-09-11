@@ -25,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,7 +74,7 @@ public class ArticleService {
         }
         // 列表只需要展示字段，显式排除 content_md / content_html 两个 LONGTEXT，
         // 否则每次翻页都会把整页文章的正文全文从数据库读回内存
-        wrapper.select(Article::getId, Article::getTitle, Article::getSummary, Article::getCover,
+        wrapper.select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary, Article::getCover,
                 Article::getViewCount, Article::getCommentCount, Article::getIsTop,
                 Article::getCategoryId, Article::getCreateTime, Article::getWordCount,
                 Article::getUserId);
@@ -261,13 +262,51 @@ public class ArticleService {
         }
         // 相关推荐只渲染标题/封面/时间，不返回正文，避免响应体里塞进 4 篇完整文章
         return articleMapper.selectList(new LambdaQueryWrapper<Article>()
-                .select(Article::getId, Article::getTitle, Article::getCover, Article::getCreateTime)
+                .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCover, Article::getCreateTime)
                 .eq(Article::getCategoryId, article.getCategoryId())
                 .eq(Article::getStatus, 1)
                 .eq(Article::getIsDeleted, 0)
                 .ne(Article::getId, id)
                 .orderByDesc(Article::getCreateTime)
                 .last("LIMIT 4"));
+    }
+
+    /**
+     * 相邻文章。列表顺序为 is_top DESC, create_time DESC, id DESC（id 作为同秒创建的兜底排序）。
+     * 用两次走索引的单行查询，替代前端原先「拉 100 篇全文到客户端再算下标」的做法（待办第 35 条）。
+     */
+    public Map<String, Object> neighbors(Long id) {
+        Article current = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getIsTop, Article::getCreateTime)
+                .eq(Article::getId, id));
+        Map<String, Object> result = new HashMap<>();
+        if (current == null || current.getCreateTime() == null) {
+            return result;
+        }
+        int top = current.getIsTop() == null ? 0 : current.getIsTop();
+        // 上一篇：排序中更靠前的一篇
+        Article prev = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getTitle, Article::getSlug)
+                .eq(Article::getStatus, 1)
+                .eq(Article::getIsDeleted, 0)
+                .and(w -> w.gt(Article::getIsTop, top)
+                        .or(w2 -> w2.eq(Article::getIsTop, top).gt(Article::getCreateTime, current.getCreateTime()))
+                        .or(w3 -> w3.eq(Article::getIsTop, top).eq(Article::getCreateTime, current.getCreateTime()).gt(Article::getId, id)))
+                .orderByAsc(Article::getIsTop).orderByAsc(Article::getCreateTime).orderByAsc(Article::getId)
+                .last("LIMIT 1"));
+        // 下一篇：排序中更靠后的一篇
+        Article next = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getTitle, Article::getSlug)
+                .eq(Article::getStatus, 1)
+                .eq(Article::getIsDeleted, 0)
+                .and(w -> w.lt(Article::getIsTop, top)
+                        .or(w2 -> w2.eq(Article::getIsTop, top).lt(Article::getCreateTime, current.getCreateTime()))
+                        .or(w3 -> w3.eq(Article::getIsTop, top).eq(Article::getCreateTime, current.getCreateTime()).lt(Article::getId, id)))
+                .orderByDesc(Article::getIsTop).orderByDesc(Article::getCreateTime).orderByDesc(Article::getId)
+                .last("LIMIT 1"));
+        result.put("prev", prev);
+        result.put("next", next);
+        return result;
     }
 
     public List<Tag> getTagsByArticleId(Long articleId) {

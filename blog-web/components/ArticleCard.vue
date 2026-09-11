@@ -66,7 +66,7 @@
 
 <script setup lang="ts">
 withDefaults(defineProps<{
-  article: { id: number; title: string; summary: string; cover: string; isTop: number; viewCount: number; commentCount: number; createTime: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
+  article: { id: number; title: string; slug?: string; summary: string; cover: string; isTop: number; viewCount: number; commentCount: number; createTime: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
   layout?: 'list' | 'grid'
 }>(), { layout: 'list' })
 </script>

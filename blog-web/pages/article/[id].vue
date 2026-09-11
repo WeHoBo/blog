@@ -69,7 +69,7 @@
           <p class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 line-clamp-1 mt-1">{{ prevArticle.title }}</p>
         </NuxtLink>
         <div v-else class="flex-1"></div>
-        <NuxtLink v-if="nextArticle" :to="`/article/${nextArticle.id}`" class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 hover:shadow-md transition group text-right">
+        <NuxtLink v-if="nextArticle" :to="nextArticle.slug ? `/post/${nextArticle.slug}` : `/article/${nextArticle.id}`" class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 hover:shadow-md transition group text-right">
           <span class="text-xs text-gray-400">下一篇 →</span>
           <p class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 line-clamp-1 mt-1">{{ nextArticle.title }}</p>
         </NuxtLink>
@@ -250,12 +250,6 @@ const { data: articleRaw, pending, error } = await useAsyncData(
   }
 )
 
-// 路由参数变化时刷新评论/上下篇/相关推荐（asyncData 由上方 watch 自动重新拉取）
-watch(() => route.params.id, () => {
-  fetchComments()
-  fetchNeighbors()
-  fetchRelated()
-})
 const article = computed(() => (articleRaw.value as any)?.article)
 const articleTags = computed(() => (articleRaw.value as any)?.tags || [])
 const author = computed(() => (articleRaw.value as any)?.author || null)
@@ -264,14 +258,9 @@ const wordCount = computed(() => currentArticle.value?.wordCount || 0)
 
 const currentArticle = computed(() => article.value)
 
-const title = (article.value as any)?.title
-const summary = (article.value as any)?.summary
-
 const commentText = ref('')
 const commentSubmitting = ref(false)
 const commentError = ref('')
-const comments = ref<any[]>([])
-const commentTotal = ref(0)
 
 const shareCopied = ref(false)
 function copyShareLink() {
@@ -288,15 +277,22 @@ function copyShareLink() {
   }
 }
 
-async function fetchComments() {
-  try {
-    const res = await get<any>(`/comment/list?articleId=${route.params.id}&pageSize=50`)
-    if (res.code === 200 && res.data) {
-      comments.value = res.data.records || []
-      commentTotal.value = res.data.total || 0
-    }
-  } catch {}
-}
+const SITE_URL = 'https://codeup.asia'
+
+/** 评论列表：用 useAsyncData 让服务端只拉一次、客户端 hydration 复用 payload，避免重复请求（第 36 条） */
+const { data: commentsData, refresh: refreshComments } = await useAsyncData(
+  `article-comments-${route.params.id}`,
+  async () => {
+    try {
+      const res = await get<any>(`/comment/list?articleId=${route.params.id}&pageSize=50`)
+      if (res.code === 200 && res.data) return { records: res.data.records || [], total: res.data.total || 0 }
+    } catch {}
+    return { records: [], total: 0 }
+  },
+  { watch: [() => route.params.id], default: () => ({ records: [], total: 0 }) }
+)
+const comments = computed(() => commentsData.value?.records || [])
+const commentTotal = computed(() => commentsData.value?.total || 0)
 
 async function submitComment() {
   if (!commentText.value.trim()) return
@@ -306,7 +302,7 @@ async function submitComment() {
     const { post } = useApi()
     await post('/comment', { articleId: Number(route.params.id), content: commentText.value })
     commentText.value = ''
-    fetchComments()
+    await refreshComments()
   } catch (e: any) {
     commentError.value = e.message || '评论失败'
   } finally {
@@ -314,32 +310,70 @@ async function submitComment() {
   }
 }
 
-const prevArticle = ref<any>(null)
-const nextArticle = ref<any>(null)
-async function fetchNeighbors() {
-  const res = await get<any>(`/article/list?pageSize=100`)
-  if (res.code === 200 && res.data?.records) {
-    const articles = res.data.records
-    const idx = articles.findIndex((a: any) => a.id === Number(route.params.id))
-    if (idx > 0) prevArticle.value = articles[idx - 1]
-    if (idx < articles.length - 1) nextArticle.value = articles[idx + 1]
-  }
-}
-fetchNeighbors()
+/** 上下篇：走后端轻量接口，不再为了算相邻文章而拉取 100 篇全文（第 35 条） */
+const { data: neighborsData } = await useAsyncData(
+  `article-neighbors-${route.params.id}`,
+  async () => {
+    try {
+      const res = await get<any>(`/article/${route.params.id}/neighbors`)
+      if (res.code === 200 && res.data) return res.data
+    } catch {}
+    return {}
+  },
+  { watch: [() => route.params.id], default: () => ({}) }
+)
+const prevArticle = computed(() => neighborsData.value?.prev || null)
+const nextArticle = computed(() => neighborsData.value?.next || null)
 
-const related = ref<any[]>([])
-async function fetchRelated() {
-  const res = await get<any>(`/article/${route.params.id}/related`)
-  if (res.code === 200) related.value = res.data || []
-}
+/** 相关推荐 */
+const { data: relatedData } = await useAsyncData(
+  `article-related-${route.params.id}`,
+  async () => {
+    try {
+      const res = await get<any>(`/article/${route.params.id}/related`)
+      if (res.code === 200) return res.data || []
+    } catch {}
+    return []
+  },
+  { watch: [() => route.params.id], default: () => [] }
+)
+const related = computed(() => relatedData.value || [])
 
-fetchComments()
-fetchRelated()
+// canonical 统一指向 /post/{slug}（有 slug 时），避免 /post/{slug} 与 /article/{id} 互相稀释权重（第 37 条）
+const canonicalUrl = computed(() => {
+  const a = article.value
+  if (!a) return `${SITE_URL}/article/${route.params.id}`
+  return a.slug ? `${SITE_URL}/post/${a.slug}` : `${SITE_URL}/article/${a.id}`
+})
 
 useSeoMeta({
-  title: title || '文章详情',
-  description: summary || '',
-  ogTitle: title || '',
-  ogDescription: summary || ''
+  title: () => (article.value?.title ? `${article.value.title} - 好啵博客` : '文章详情 - 好啵博客'),
+  description: () => article.value?.summary || '好啵博客技术文章',
+  ogTitle: () => article.value?.title || '好啵博客',
+  ogDescription: () => article.value?.summary || '一个程序员的个人技术博客',
+  ogImage: () => article.value?.cover || `${SITE_URL}/apple-touch-icon.png`,
+  ogType: 'article',
+  ogUrl: () => canonicalUrl.value
 })
+
+// Article 结构化数据（第 38 条）
+useHead(() => ({
+  link: [{ rel: 'canonical', href: canonicalUrl.value }],
+  script: article.value
+    ? [{
+        type: 'application/ld+json',
+        innerHTML: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'Article',
+          headline: article.value.title,
+          description: article.value.summary || '',
+          image: article.value.cover ? [article.value.cover] : undefined,
+          datePublished: article.value.createTime || undefined,
+          dateModified: article.value.updateTime || article.value.createTime || undefined,
+          author: { '@type': 'Person', name: '好啵' },
+          mainEntityOfPage: canonicalUrl.value
+        })
+      }]
+    : []
+}))
 </script>

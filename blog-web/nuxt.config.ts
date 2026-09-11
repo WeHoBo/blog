@@ -1,6 +1,6 @@
 export default defineNuxtConfig({
   devtools: { enabled: true },
-  modules: ['@pinia/nuxt', '@nuxtjs/tailwindcss', '@nuxt/icon', '@nuxtjs/color-mode'],
+  modules: ['@pinia/nuxt', '@nuxtjs/tailwindcss', '@nuxtjs/color-mode'],
 
   ssr: true,
 
@@ -16,6 +16,11 @@ export default defineNuxtConfig({
     routeRules: {
       '/api/**': {
         proxy: 'http://127.0.0.1:8080/api/**'
+      },
+      // sitemap 由后端 SitemapController 动态生成（含最新文章），
+      // 这里转发一层，使 https://codeup.asia/sitemap.xml 可直接访问，无需再改 nginx
+      '/sitemap.xml': {
+        proxy: 'http://127.0.0.1:8080/sitemap.xml'
       }
     }
   },
@@ -24,10 +29,11 @@ export default defineNuxtConfig({
     build: {
       rollupOptions: {
         output: {
-          // 保留 chunk 名称（便于按名字控制 prefetch）；hljs 单独分包
+          // 保留 chunk 名称（便于按名字控制 prefetch）；hljs 单独分包。
+          // 只列代码真正 import 的 lib/common，避免把全量 highlight.js 也拉进来。
           chunkFileNames: '_nuxt/[name]-[hash].js',
           manualChunks: {
-            hljs: ['highlight.js', 'highlight.js/lib/common']
+            hljs: ['highlight.js/lib/common']
           }
         }
       }

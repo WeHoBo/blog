@@ -64,5 +64,12 @@ function fixUrl(url: string) {
 fetchLinks()
 fetchConfig()
 
-useSeoMeta({ title: '关于 - 好啵博客' })
+useSeoMeta({
+  title: '关于 - 好啵博客',
+  description: '关于好啵博客：一个程序员记录技术思考、编程心得与学习笔记的地方。',
+  ogTitle: '关于 - 好啵博客',
+  ogDescription: '关于好啵博客：记录技术思考与编程心得。',
+  ogImage: 'https://codeup.asia/apple-touch-icon.png'
+})
+useHead({ link: [{ rel: 'canonical', href: 'https://codeup.asia/about' }] })
 </script>

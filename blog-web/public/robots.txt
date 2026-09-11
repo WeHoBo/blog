@@ -1,0 +1,8 @@
+# https://codeup.asia/robots.txt
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/
+Disallow: /profile
+
+Sitemap: https://codeup.asia/sitemap.xml

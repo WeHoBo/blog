@@ -125,6 +125,7 @@ public class ArticleController {
                 Map<String, Object> item = new HashMap<>();
                 item.put("id", a.getId());
                 item.put("title", a.getTitle());
+                item.put("slug", a.getSlug());
                 item.put("summary", a.getSummary());
                 item.put("cover", a.getCover());
                 item.put("viewCount", a.getViewCount());
@@ -196,6 +197,12 @@ public class ArticleController {
     @GetMapping("/{id}/related")
     public Result<List<Article>> related(@PathVariable Long id) {
         return Result.ok(articleService.related(id));
+    }
+
+    /** 上一篇 / 下一篇（只返回 id/title/slug，避免为了算相邻文章而拉取整页列表） */
+    @GetMapping("/{id}/neighbors")
+    public Result<Map<String, Object>> neighbors(@PathVariable Long id) {
+        return Result.ok(articleService.neighbors(id));
     }
 
     @PreAuthorize("hasRole('admin')")
@@ -298,7 +305,7 @@ public class ArticleController {
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
                         .eq(Article::getIsDeleted, 0)
-                        .select(Article::getId, Article::getTitle, Article::getCreateTime)
+                        .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCreateTime)
                         .orderByDesc(Article::getCreateTime));
 
         Map<Integer, Map<Integer, List<Map<String, Object>>>> yearMap = new LinkedHashMap<>();

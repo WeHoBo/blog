@@ -10,7 +10,7 @@
           {{ yearItem.year }}年{{ monthItem.month }}月 ({{ monthItem.count }}篇)
         </h3>
         <div class="space-y-1">
-          <NuxtLink v-for="a in monthItem.articles" :key="a.id" :to="`/article/${a.id}`" class="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition text-sm group">
+          <NuxtLink v-for="a in monthItem.articles" :key="a.id" :to="a.slug ? `/post/${a.slug}` : `/article/${a.id}`" class="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition text-sm group">
             <span class="text-xs text-gray-400 w-20 flex-shrink-0">{{ a.createTime?.substring(5) }}</span>
             <span class="text-gray-700 dark:text-gray-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 line-clamp-1">{{ a.title }}</span>
           </NuxtLink>
@@ -35,5 +35,12 @@ const { data } = await useAsyncData('archive', async () => {
   loading.value = false
 })
 
-useSeoMeta({ title: '文章归档 - 好啵博客' })
+useSeoMeta({
+  title: '文章归档 - 好啵博客',
+  description: '好啵博客的文章归档：按年月浏览全部已发布的技术文章。',
+  ogTitle: '文章归档 - 好啵博客',
+  ogDescription: '按年月浏览好啵博客的全部已发布文章。',
+  ogImage: 'https://codeup.asia/apple-touch-icon.png'
+})
+useHead({ link: [{ rel: 'canonical', href: 'https://codeup.asia/archive' }] })
 </script>
