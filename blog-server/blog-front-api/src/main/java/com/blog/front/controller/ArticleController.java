@@ -41,6 +41,12 @@ public class ArticleController {
     private final ArticleMapper articleMapper;
     private final UserMapper userMapper;
 
+    private boolean isAdmin() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_admin".equals(a.getAuthority()));
+    }
+
     @GetMapping("/list")
     public Result<Map<String, Object>> list(
             @RequestParam(defaultValue = "1") int pageNum,
@@ -120,7 +126,7 @@ public class ArticleController {
 
     @GetMapping("/{id:\\d+}")
     public Result<Map<String, Object>> detail(@PathVariable Long id) {
-        Article article = articleService.getById(id);
+        Article article = isAdmin() ? articleService.getAdminById(id) : articleService.getPublicById(id);
         List<Tag> tags = articleService.getTagsByArticleId(id);
         Map<String, Object> result = new HashMap<>();
         result.put("article", article);
@@ -213,7 +219,7 @@ public class ArticleController {
     public void batchExport(@RequestBody List<Long> ids, HttpServletResponse response) throws IOException {
         StringBuilder sb = new StringBuilder();
         for (Long id : ids) {
-            Article article = articleService.getById(id);
+            Article article = articleService.getAdminById(id);
             sb.append("---\n");
             sb.append("title: ").append(article.getTitle()).append("\n");
             sb.append("date: ").append(article.getCreateTime()).append("\n");
@@ -229,7 +235,7 @@ public class ArticleController {
 
     @GetMapping("/{id}/export")
     public void exportMd(@PathVariable Long id, HttpServletResponse response) throws IOException {
-        Article article = articleService.getById(id);
+        Article article = articleService.getPublicById(id);
         String content = article.getContentMd() != null ? article.getContentMd() : "";
         String filename = article.getTitle() + ".md";
         response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
@@ -243,6 +249,7 @@ public class ArticleController {
         List<Article> articles = articleMapper.selectList(
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
+                        .eq(Article::getVisibility, 0)
                         .eq(Article::getIsDeleted, 0)
                         .select(Article::getId, Article::getTitle, Article::getCreateTime)
                         .orderByDesc(Article::getCreateTime));
@@ -287,6 +294,7 @@ public class ArticleController {
         List<Article> articles = articleMapper.selectList(
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
+                        .eq(Article::getVisibility, 0)
                         .eq(Article::getIsDeleted, 0)
                         .isNotNull(Article::getSeries)
                         .ne(Article::getSeries, "")

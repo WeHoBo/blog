@@ -65,7 +65,7 @@
             <td class="px-4 py-3 text-gray-400">{{ a.createTime?.substring(0, 10) }}</td>
             <td class="px-4 py-3">
               <NuxtLink :to="`/admin/articles/${a.id}`" class="text-primary-500 hover:underline text-xs mr-3">编辑</NuxtLink>
-              <a :href="`${apiBase}/article/${a.id}/export`" class="text-green-500 hover:underline text-xs mr-3">导出</a>
+              <button @click="handleExportOne(a)" class="text-green-500 hover:underline text-xs mr-3">导出</button>
               <button @click="handleDelete(a.id)" class="text-red-500 hover:underline text-xs">删除</button>
             </td>
           </tr>
@@ -83,6 +83,7 @@ definePageMeta({ middleware: 'admin', layout: 'admin' })
 const { get, del, post } = useApi()
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
+const token = useCookie('token')
 const fileInput = ref<HTMLInputElement | null>(null)
 const pageNum = ref(1)
 const keyword = ref('')
@@ -171,21 +172,34 @@ async function handleBatchDelete() {
   }
 }
 
+async function downloadMarkdown(ids: number[], filename: string) {
+  const resp = await $fetch(`${apiBase}/article/batch-export`, {
+    method: 'POST',
+    body: ids,
+    headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+    responseType: 'arrayBuffer'
+  })
+  const blob = new Blob([resp as any], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
 async function handleBatchExport() {
   try {
-    const token = authStore?.token || ''
-    const resp = await $fetch(`${apiBase}/article/batch-export`, {
-      method: 'POST',
-      body: selectedIds.value,
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    })
-    const blob = new Blob([resp as any], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'articles-export.md'; a.click()
-    URL.revokeObjectURL(url)
+    await downloadMarkdown(selectedIds.value, 'articles-export.md')
   } catch (e: any) {
     alert('批量导出失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function handleExportOne(a: any) {
+  try {
+    const name = String(a.title || 'article').replace(/[\\/:*?"<>|]/g, '_')
+    await downloadMarkdown([a.id], `${name}.md`)
+  } catch (e: any) {
+    alert('导出失败: ' + (e.message || '未知错误'))
   }
 }
 

@@ -16,6 +16,7 @@ dist/
 .idea/
 *.iml
 .vscode/
+.workbuddy/
 
 # OS
 .DS_Store
@@ -31,6 +32,8 @@ uploads/
 deploy/
 *.real
 *.yml.real
+application-local.yml
+application-local.yaml
 
 # Build artifacts
 output.tar.gz

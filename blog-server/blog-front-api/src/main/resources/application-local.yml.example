@@ -1,0 +1,19 @@
+# 本地开发配置模板：复制为同目录下的 application-local.yml 后按需修改
+# 该文件已在 .gitignore 中忽略，不会被提交
+# 启动方式：mvn spring-boot:run -Dspring-boot.run.profiles=local（或 IDE 中激活 local profile）
+spring:
+  datasource:
+    password: your-local-db-password
+
+jwt:
+  secret: blog-local-dev-secret-0123456789abcdef0123456789abcdef
+
+# 本地默认使用本地文件存储（./uploads），如需 OSS 取消注释并填真实密钥
+# aliyun:
+#   oss:
+#     enabled: true
+#     endpoint: oss-cn-wulanchabu.aliyuncs.com
+#     bucket-name: wehobo
+#     access-key-id: your-access-key-id
+#     access-key-secret: your-access-key-secret
+#     base-dir: images/

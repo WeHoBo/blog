@@ -3,7 +3,7 @@ app:
   web-url: http://localhost:3000
 
 ai:
-  rag-url: http://127.0.0.1:8000
+  rag-url: ${RAG_URL:http://127.0.0.1:8000}
 
 server:
   port: 8080
@@ -13,7 +13,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/blog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
     username: root
-    password: CHANGE_ME
+    password: ${DB_PASSWORD:}
   data:
     redis:
       host: localhost
@@ -58,7 +58,7 @@ springdoc:
       packages-to-scan: com.blog.front.controller
 
 jwt:
-  secret: CHANGE_ME
+  secret: ${JWT_SECRET:blog-dev-only-secret-0123456789abcdef0123456789abcdef}
   expiration: 86400000
 
 file:
@@ -68,22 +68,13 @@ file:
 
 oauth:
   github:
-    client-id: CHANGE_ME
-    client-secret: CHANGE_ME
+    client-id: ${GITHUB_CLIENT_ID:}
+    client-secret: ${GITHUB_CLIENT_SECRET:}
     proxy-host: 127.0.0.1
     proxy-port: 7890
   gitee:
-    client-id: CHANGE_ME
-    client-secret: CHANGE_ME
+    client-id: ${GITEE_CLIENT_ID:}
+    client-secret: ${GITEE_CLIENT_SECRET:}
   huawei:
-    client-id: CHANGE_ME
-    client-secret: CHANGE_ME
-
-aliyun:
-  oss:
-    enabled: true
-    endpoint: oss-cn-wulanchabu.aliyuncs.com
-    bucket-name: wehobo
-    access-key-id: CHANGE_ME
-    access-key-secret: CHANGE_ME
-    base-dir: images/
+    client-id: ${HUAWEI_CLIENT_ID:}
+    client-secret: ${HUAWEI_CLIENT_SECRET:}
