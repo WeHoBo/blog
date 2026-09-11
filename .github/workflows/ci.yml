@@ -38,6 +38,12 @@ jobs:
           cache-dependency-path: blog-web/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Prepare Nuxt
+        # blog-web/tsconfig.json 只有 "extends": "./.nuxt/tsconfig.json"，
+        # 而 .nuxt/ 被 gitignore，CI 全新 checkout 时不存在该文件，
+        # 会导致 vite:oxc 报 [TSCONFIG_ERROR] Tsconfig not found 而测试直接失败。
+        # 先让 Nuxt 生成 .nuxt/tsconfig.json 再跑测试。
+        run: npx nuxi prepare
       - name: Run unit tests
         run: npm test
       - name: Build
