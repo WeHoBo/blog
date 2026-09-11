@@ -24,7 +24,9 @@ async function ensureMermaid() {
 }
 
 const md = new MarkdownIt({
-  html: true, linkify: true, typographer: true, breaks: true,
+  // html: false —— 禁用正文中的裸 HTML，避免配合 v-html 造成存储型 XSS。
+  // 代码块高亮、mermaid 等由下方 renderer 规则生成 HTML，不受此开关影响。
+  html: false, linkify: true, typographer: true, breaks: true,
   highlight(str: string, lang: string) {
     if (lang === 'mermaid') {
       return '<div class="mermaid-wrapper"><div class="mermaid">' + md.utils.escapeHtml(str) + '</div></div>'

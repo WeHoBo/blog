@@ -9,7 +9,9 @@ main.py - FastAPI 后端入口
   GET  /history    获取聊天会话历史
 
 启动方式（在 backend 目录下）：
-  uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+  uvicorn main:app --host 127.0.0.1 --port 8000
+  说明：服务只监听回环地址，仅由 Java 后端（AiController）经 127.0.0.1 转发调用；
+       生产环境请在 .env 配置 RAG_API_TOKEN，与 Java 端 ai.rag-token 保持一致。
 """
 import asyncio
 import os
@@ -27,7 +29,7 @@ except ImportError:
     pass
 
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -43,6 +45,18 @@ vector_store: VectorStore | None = None
 llm: LLMClient | None = None
 
 
+async def verify_token(x_rag_token: str | None = Header(default=None, alias="X-RAG-Token")):
+    """全局依赖：校验调用方令牌。
+
+    - 已配置 RAG_API_TOKEN：请求头 X-RAG-Token 必须完全一致，否则 401。
+    - 未配置：放行（仅适用于本机开发，服务默认只监听 127.0.0.1）。
+    """
+    if not config.RAG_API_TOKEN:
+        return
+    if x_rag_token != config.RAG_API_TOKEN:
+        raise HTTPException(status_code=401, detail="无效的调用令牌")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """应用启动时初始化向量库与大模型客户端（若 .env 未配置会在此处给出明确报错）"""
@@ -50,6 +64,8 @@ async def lifespan(_: FastAPI):
     vector_store = VectorStore(EmbeddingClient())  # 初始化 ChromaDB + Embedding 客户端
     llm = LLMClient()                              # 初始化 DeepSeek 客户端
     print(f"[启动] 向量库就绪，当前共有 {vector_store.count()} 个文本块")
+    if not config.RAG_API_TOKEN:
+        print("[启动][警告] 未配置 RAG_API_TOKEN，接口不校验调用令牌（仅建议本机开发使用）")
     yield
 
 
@@ -58,6 +74,7 @@ app = FastAPI(
     description="上传 PDF 建立企业知识库，基于 DeepSeek + ChromaDB 实现流式 RAG 问答",
     version="1.0.0",
     lifespan=lifespan,
+    dependencies=[Depends(verify_token)],
 )
 
 # 允许前端开发服务器跨域访问（博客通过 Java 代理转发，这里保留开发期跨域）
@@ -273,5 +290,5 @@ def get_history(limit: int = Query(default=50, ge=1, le=200)):
 
 
 if __name__ == "__main__":
-    # 支持直接 python main.py 启动
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # 支持直接 python main.py 启动：只监听回环地址，且禁用 reload（自动重载仅用于本地调试）
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)

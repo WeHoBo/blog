@@ -25,10 +25,21 @@ public class AiController {
     @Value("${ai.rag-url:http://127.0.0.1:8000}")
     private String ragUrl;
 
+    /** 与 RAG 服务共享的调用令牌（RAG_API_TOKEN）；为空时不附加请求头（兼容未开启鉴权的旧部署） */
+    @Value("${ai.rag-token:}")
+    private String ragToken;
+
+    private HttpRequest withAuth(HttpRequest req) {
+        if (ragToken != null && !ragToken.isBlank()) {
+            req.header("X-RAG-Token", ragToken);
+        }
+        return req;
+    }
+
     private StreamingResponseBody forward(String path, String rawBody) {
         final String payload = (rawBody == null || rawBody.isBlank()) ? "{}" : rawBody;
         return outputStream -> {
-            HttpResponse resp = HttpRequest.post(ragUrl + path)
+            HttpResponse resp = withAuth(HttpRequest.post(ragUrl + path))
                     .header("Content-Type", "application/json")
                     .body(payload.getBytes(StandardCharsets.UTF_8))
                     .timeout(180000)
@@ -67,7 +78,7 @@ public class AiController {
     @GetMapping("/documents")
     public Result<?> documents() {
         try {
-            HttpResponse resp = HttpRequest.get(ragUrl + "/documents")
+            HttpResponse resp = withAuth(HttpRequest.get(ragUrl + "/documents"))
                     .timeout(10000)
                     .execute();
             return Result.ok(com.alibaba.fastjson2.JSON.parse(resp.body()));

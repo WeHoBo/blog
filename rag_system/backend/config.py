@@ -41,3 +41,8 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))        # 文本块大小（字符数）
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80"))   # 相邻文本块重叠度（字符数）
 TOP_K = int(os.getenv("TOP_K", "5"))                    # 向量检索返回的相关片段数量
+
+# ---------------- 服务调用鉴权（生产必须配置） ----------------
+# 必须与 Java 后端 application(-prod).yml 的 ai.rag-token / 环境变量 RAG_API_TOKEN 完全一致。
+# 为空时服务不校验令牌（仅适用于本机开发：服务默认只监听 127.0.0.1）。
+RAG_API_TOKEN = os.getenv("RAG_API_TOKEN", "")

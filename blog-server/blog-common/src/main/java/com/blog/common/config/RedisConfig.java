@@ -51,7 +51,11 @@ public class RedisConfig {
             if (bytes == null || bytes.length == 0) {
                 return null;
             }
-            return JSON.parseObject(new String(bytes, DEFAULT_CHARSET), Object.class, JSONReader.Feature.SupportAutoType);
+            // 安全：写侧带 WriteClassName 便于还原具体类型，读侧绝不能放开 SupportAutoType 全局反序列化
+            // （一旦 Redis 被投毒可触发反序列化 RCE）。改用 autoTypeFilter 限定只允许本项目的类。
+            return JSON.parseObject(new String(bytes, DEFAULT_CHARSET), Object.class,
+                    JSONReader.autoTypeFilter("com.blog."),
+                    JSONReader.Feature.SupportAutoType);
         }
     }
 }
