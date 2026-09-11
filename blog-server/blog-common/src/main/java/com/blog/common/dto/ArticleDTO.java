@@ -31,8 +31,4 @@ public class ArticleDTO {
     private Integer status;
 
     private Integer isTop;
-
-    private Integer isEncrypted;
-
-    private String password;
 }

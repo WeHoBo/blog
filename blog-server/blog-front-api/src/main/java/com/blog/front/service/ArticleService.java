@@ -93,12 +93,12 @@ public class ArticleService {
         }
         wrapper.orderByDesc(Article::getIsTop)
                 .orderByDesc(Article::getCreateTime);
-        // 后台列表同样只取元信息：排除 content_md / content_html / password 三个大字段
+        // 后台列表同样只取元信息：排除 content_md / content_html 两个正文大字段
         wrapper.select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary,
                 Article::getCover, Article::getStatus, Article::getUserId, Article::getCategoryId,
                 Article::getSeries, Article::getIsTop, Article::getViewCount,
                 Article::getCommentCount, Article::getLikeCount, Article::getWordCount,
-                Article::getIsDeleted, Article::getIsEncrypted,
+                Article::getIsDeleted,
                 Article::getCreateTime, Article::getUpdateTime);
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }

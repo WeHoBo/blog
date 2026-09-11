@@ -40,8 +40,4 @@ public class Article extends BaseEntity {
     private Integer wordCount;
 
     private Integer isDeleted;
-
-    private Integer isEncrypted;
-
-    private String password;
 }
