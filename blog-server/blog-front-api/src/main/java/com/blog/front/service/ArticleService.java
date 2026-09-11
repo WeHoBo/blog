@@ -24,6 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -177,7 +178,16 @@ public class ArticleService {
     }
 
     public List<Tag> listTags() {
-        return tagMapper.selectList(null);
+        List<Tag> tags = tagMapper.selectList(null);
+        // 统计每个标签下的文章数（含草稿？按已发布统计）
+        List<ArticleTag> ats = articleTagMapper.selectList(null);
+        Map<Long, Long> countMap = ats.stream().collect(Collectors.groupingBy(
+                ArticleTag::getTagId, Collectors.counting()));
+        for (Tag tag : tags) {
+            Long c = countMap.get(tag.getId());
+            tag.setArticleCount(c == null ? 0 : c.intValue());
+        }
+        return tags;
     }
 
     public List<Article> related(Long id) {

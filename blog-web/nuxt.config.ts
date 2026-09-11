@@ -11,9 +11,25 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    // 构建期生成 .gz / .br 压缩产物，服务器 Nginx 用 gzip_static 直接发
+    compressPublicAssets: { gzip: true, brotli: true },
     routeRules: {
       '/api/**': {
         proxy: 'http://127.0.0.1:8080/api/**'
+      }
+    }
+  },
+
+  vite: {
+    build: {
+      rollupOptions: {
+        output: {
+          // 保留 chunk 名称（便于按名字控制 prefetch）；hljs 单独分包
+          chunkFileNames: '_nuxt/[name]-[hash].js',
+          manualChunks: {
+            hljs: ['highlight.js', 'highlight.js/lib/common']
+          }
+        }
       }
     }
   },

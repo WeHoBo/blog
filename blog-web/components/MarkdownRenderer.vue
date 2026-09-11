@@ -4,14 +4,24 @@
 
 <script setup lang="ts">
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
+// 仅引入常用语言子集（~300KB），体积远小于完整包；文章页必需，SSR 同样可用
+import hljs from 'highlight.js/lib/common'
 import markdownItFootnote from 'markdown-it-footnote'
 import markdownItTaskLists from 'markdown-it-task-lists'
-import mermaid from 'mermaid'
 
 const props = defineProps<{ content: string }>()
 
-mermaid.initialize({ startOnLoad: false, theme: 'default' })
+// mermaid 体积大（含上百个子模块，~3MB），放在 public/vendor 运行时按需加载，
+// 不参与打包 —— 避免其所有子模块被 Nuxt prefetch 到每个页面
+let mermaid: any = null
+const needMermaid = (s: string) => /```mermaid\b/.test(s || '')
+
+async function ensureMermaid() {
+  if (!mermaid) {
+    mermaid = (await import(/* @vite-ignore */ '/vendor/mermaid/mermaid.esm.min.mjs')).default
+    mermaid.initialize({ startOnLoad: false, theme: 'default' })
+  }
+}
 
 const md = new MarkdownIt({
   html: true, linkify: true, typographer: true, breaks: true,
@@ -23,11 +33,11 @@ const md = new MarkdownIt({
     if (lang && hljs.getLanguage(lang)) {
       try {
         const result = hljs.highlight(str, { language: lang, ignoreIllegals: true }).value
-        const lines = result.split('\n').map((l, i) => `<span class="line"><span class="line-no"></span>${l || '&nbsp;'}</span>`).join('')
+        const lines = result.split('\n').map((l) => `<span class="line"><span class="line-no"></span>${l || '&nbsp;'}</span>`).join('')
         return '<div class="code-wrapper">' + label + '<pre class="hljs"><code>' + lines + '</code></pre></div>'
       } catch {}
     }
-    const lines = str.split('\n').map((l, i) => `<span class="line"><span class="line-no"></span>${md.utils.escapeHtml(l) || '&nbsp;'}</span>`).join('')
+    const lines = str.split('\n').map((l) => `<span class="line"><span class="line-no"></span>${md.utils.escapeHtml(l) || '&nbsp;'}</span>`).join('')
     return '<div class="code-wrapper">' + label + '<pre class="hljs"><code>' + lines + '</code></pre></div>'
   }
 })
@@ -52,14 +62,20 @@ onMounted(async () => {
   const el = contentRef.value
   if (!el) return
 
-  // Mermaid rendering
+  // Mermaid rendering（按需加载）
   const mermaidEls = el.querySelectorAll('.mermaid')
-  if (mermaidEls.length > 0) {
-    await mermaid.run({ nodes: Array.from(mermaidEls) })
+  if (mermaidEls.length > 0 || needMermaid(props.content)) {
+    await ensureMermaid()
+    const nodes = el.querySelectorAll('.mermaid')
+    if (nodes.length > 0) {
+      try {
+        await mermaid.run({ nodes: Array.from(nodes) })
+      } catch {}
+    }
   }
 
-  // Copy buttons + Mermaid fullscreen
-  el.querySelectorAll('pre.hljs').forEach((pre, i) => {
+  // Copy buttons
+  el.querySelectorAll('pre.hljs').forEach((pre) => {
     const codeBlock = pre.closest('.code-wrapper')
     const container = codeBlock || pre
     ;(container as HTMLElement).style.position = 'relative'
@@ -77,7 +93,10 @@ onMounted(async () => {
 
   // Mermaid click to zoom
   el.querySelectorAll('.mermaid-wrapper').forEach(wrapper => {
-    wrapper.addEventListener('click', () => {
+    wrapper.addEventListener('click', async () => {
+      if (!mermaid) {
+        try { await ensureMermaid() } catch { return }
+      }
       const div = document.createElement('div')
       div.className = 'fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-8'
       div.innerHTML = '<div class="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-4xl max-h-full overflow-auto"><button class="absolute top-4 right-4 text-2xl text-gray-500 hover:text-gray-800 dark:hover:text-white">&times;</button></div>'
@@ -88,7 +107,7 @@ onMounted(async () => {
       box.querySelector('button')!.onclick = () => div.remove()
       div.onclick = (e) => { if (e.target === div) div.remove() }
       document.body.appendChild(div)
-      mermaid.run({ nodes: [clone.querySelector('svg')].filter(Boolean) })
+      try { mermaid.run({ nodes: [clone.querySelector('svg')].filter(Boolean) }) } catch {}
     })
     ;(wrapper as HTMLElement).style.cursor = 'pointer'
     wrapper.setAttribute('title', '点击放大')

@@ -39,16 +39,20 @@ const renderedAbout = computed(() => {
 })
 
 async function fetchLinks() {
-  const res = await get<any>('/friend-link/list')
-  if (res.code === 200) links.value = res.data || []
+  try {
+    const res = await get<any>('/friend-link/list')
+    if (res.code === 200) links.value = res.data || []
+  } catch { /* 容错 */ }
 }
 
 async function fetchConfig() {
-  const res = await get<any>('/site-config/public')
-  if (res.code === 200 && res.data) {
-    siteName.value = res.data.siteName || '好啵博客'
-    aboutContent.value = res.data.aboutContent || ''
-  }
+  try {
+    const res = await get<any>('/site-config/public')
+    if (res.code === 200 && res.data) {
+      siteName.value = res.data.siteName || '好啵博客'
+      aboutContent.value = res.data.aboutContent || ''
+    }
+  } catch { /* 容错 */ }
 }
 
 function fixUrl(url: string) {

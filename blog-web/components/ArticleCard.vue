@@ -1,13 +1,15 @@
 <template>
   <NuxtLink :to="article.slug ? `/post/${article.slug}` : `/article/${article.id}`"
-    class="block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600 transition-colors overflow-hidden group"
+    class="block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600 transition-all duration-200 overflow-hidden group hover:-translate-y-0.5 hover:shadow-md"
     :class="layout === 'grid' ? 'flex flex-col h-full' : ''">
     <!-- 网格模式：顶部插图 + 下方信息 -->
     <template v-if="layout === 'grid'">
-      <div class="h-40 overflow-hidden bg-gray-100 dark:bg-gray-700 flex-shrink-0">
+      <div class="aspect-video overflow-hidden bg-gray-100 dark:bg-gray-700 flex-shrink-0">
         <img v-if="article.cover" :src="article.cover" :alt="article.title" loading="lazy"
           class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-        <div v-else class="w-full h-full flex items-center justify-center text-3xl">📄</div>
+        <div v-else class="w-full h-full flex items-center justify-center">
+          <svg class="w-10 h-10 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z"/></svg>
+        </div>
       </div>
       <div class="p-4 flex-1 flex flex-col">
         <h3 class="text-2xl font-extrabold text-gray-900 dark:text-gray-100 line-clamp-2 title-hover transition-colors">
@@ -15,9 +17,9 @@
           {{ article.title }}
         </h3>
         <div class="mt-3 flex items-center gap-3 text-xs text-gray-400 mt-auto pt-2">
-          <span>📅 {{ article.createTime?.substring(0, 10) }}</span>
-          <span>👁 {{ article.viewCount }}</span>
-          <span>💬 {{ article.commentCount || 0 }}</span>
+          <span>{{ article.createTime?.substring(0, 10) }}</span>
+          <span>{{ article.viewCount }} 阅读</span>
+          <span>{{ article.commentCount || 0 }} 评论</span>
         </div>
       </div>
     </template>
@@ -34,16 +36,12 @@
             <span class="theme-text flex-shrink-0 transition-transform group-hover:translate-x-1">→</span>
           </div>
 
-          <div class="flex flex-wrap gap-2 mb-3">
-            <span class="flex items-center gap-1.5 px-2 py-1 rounded-lg theme-chip text-xs">
-              <span class="text-sm">📅</span>{{ article.createTime?.substring(0, 10) }}
-            </span>
-            <span class="flex items-center gap-1.5 px-2 py-1 rounded-lg theme-chip text-xs">
-              <span class="text-sm">📄</span>{{ article.wordCount || 0 }} 字
-            </span>
-            <span class="flex items-center gap-1.5 px-2 py-1 rounded-lg theme-chip text-xs">
-              <span class="text-sm">📂</span>{{ article.categoryName || '未分类' }}
-            </span>
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mb-3 text-xs text-gray-400 dark:text-gray-500">
+            <span>{{ article.createTime?.substring(0, 10) }}</span>
+            <span class="opacity-40">·</span>
+            <span>{{ article.wordCount || 0 }} 字</span>
+            <span class="opacity-40">·</span>
+            <span class="theme-text">{{ article.categoryName || '未分类' }}</span>
           </div>
 
           <p v-if="article.summary" class="text-gray-400 dark:text-gray-500 text-sm line-clamp-2 leading-relaxed mb-3">{{ article.summary }}</p>
@@ -58,7 +56,7 @@
         <div class="hidden sm:block w-36 lg:w-44 flex-shrink-0 border-l border-gray-100 dark:border-gray-700">
           <div class="h-full min-h-[10rem] theme-illustration flex items-center justify-center">
             <img v-if="article.cover" :src="article.cover" :alt="article.title" loading="lazy" class="w-full h-full object-cover" />
-            <span v-else class="text-4xl">📄</span>
+            <svg v-else class="w-10 h-10 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z"/></svg>
           </div>
         </div>
       </div>

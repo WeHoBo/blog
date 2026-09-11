@@ -16,7 +16,6 @@
       <!-- Desktop Nav -->
       <nav class="hidden lg:flex items-center gap-1 bg-white/40 dark:bg-white/5 rounded-full px-1 py-1 backdrop-blur-sm">
         <NuxtLink to="/" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">首页</NuxtLink>
-        <NuxtLink v-if="authStore.isAdmin" to="/admin/articles" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">管理</NuxtLink>
         <NuxtLink to="/about" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">关于</NuxtLink>
         <NuxtLink to="/archive" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">归档</NuxtLink>
         <button @click="settingsOpen = true" class="px-2 py-1.5 rounded-full text-sm text-gray-500 hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition" title="主题设置">
@@ -27,8 +26,11 @@
       <!-- Search -->
       <div class="flex-1 max-w-md hidden sm:block mx-2">
         <div class="relative">
-          <input v-model="searchText" @keyup.enter="doSearch" placeholder="搜索文章" class="w-full pl-9 pr-4 py-1.5 rounded-full border-2 border-primary-100 bg-white/70 dark:bg-gray-800/70 dark:border-gray-700 dark:text-gray-100 text-sm focus:border-primary-400 dark:focus:border-primary-500 focus:outline-none transition backdrop-blur-sm" />
-          <span class="absolute left-3 top-1.5 text-gray-400 text-sm">🔍</span>
+          <input ref="searchInput" v-model="searchText" @keyup.enter="doSearch" placeholder="搜索文章、标签、分类 (Ctrl+K)" class="w-full pl-9 pr-10 py-1.5 rounded-full border-2 border-primary-100 bg-white/70 dark:bg-gray-800/70 dark:border-gray-700 dark:text-gray-100 text-sm focus:border-primary-400 dark:focus:border-primary-500 focus:outline-none transition backdrop-blur-sm" />
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"/></svg>
+          </span>
+          <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 border dark:border-gray-600 hidden sm:block">Ctrl K</span>
         </div>
       </div>
 
@@ -36,8 +38,23 @@
       <div class="flex items-center gap-2 flex-shrink-0">
         <template v-if="authStore.isLoggedIn">
           <NuxtLink v-if="authStore.isAdmin" to="/admin/articles/create" class="hidden sm:inline-flex items-center gap-1 px-4 py-1.5 rounded-full bg-primary-600 text-white text-xs sm:text-sm font-medium hover:bg-primary-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">✏️ 写文章</NuxtLink>
-          <NuxtLink to="/profile" class="hidden sm:block text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition">{{ authStore.user?.nickname }}</NuxtLink>
-          <button @click="authStore.logout" class="text-sm text-gray-400 hover:text-red-500 transition">退出</button>
+          <!-- User dropdown -->
+          <div class="relative">
+            <button @click="userOpen = !userOpen" class="hidden sm:flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+              <img v-if="authStore.user?.avatar" :src="authStore.user.avatar" alt="avatar" class="w-6 h-6 rounded-full object-cover" />
+              <span v-else class="w-6 h-6 rounded-full bg-primary-600 text-white flex items-center justify-center text-xs font-bold">{{ authStore.user?.nickname?.[0] || 'U' }}</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400 max-w-[6rem] truncate">{{ authStore.user?.nickname }}</span>
+              <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div v-if="userOpen" class="absolute right-0 mt-2 w-44 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 py-1.5 z-50">
+              <NuxtLink to="/profile" @click="userOpen = false" class="block px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition">👤 个人主页</NuxtLink>
+              <NuxtLink v-if="authStore.isAdmin" to="/admin/articles" @click="userOpen = false" class="block px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition">📋 管理后台</NuxtLink>
+              <button @click="userOpen = false; settingsOpen = true" class="w-full text-left px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition">⚙️ 设置</button>
+              <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+              <button @click="handleLogout" class="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition">🚪 退出登录</button>
+            </div>
+          </div>
+          <button @click="authStore.logout" class="sm:hidden text-sm text-gray-400 hover:text-red-500 transition">退出</button>
         </template>
         <template v-else>
           <NuxtLink to="/login" class="px-4 py-1.5 rounded-full bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition">登录</NuxtLink>
@@ -56,9 +73,10 @@
     <!-- Mobile menu -->
     <div v-if="mobileOpen" class="lg:hidden border-t dark:border-gray-700 py-3 space-y-1 pb-4 px-4">
       <NuxtLink to="/" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-primary-100/70 dark:hover:bg-primary-500/20">首页</NuxtLink>
-      <NuxtLink v-if="authStore.isAdmin" to="/admin/articles" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-primary-100/70 dark:hover:bg-primary-500/20">管理</NuxtLink>
+      <NuxtLink v-if="authStore.isAdmin" to="/admin/articles" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-primary-100/70 dark:hover:bg-primary-500/20">📋 管理后台</NuxtLink>
       <NuxtLink to="/about" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-primary-100/70 dark:hover:bg-primary-500/20">关于</NuxtLink>
       <NuxtLink to="/archive" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-primary-100/70 dark:hover:bg-primary-500/20">归档</NuxtLink>
+      <NuxtLink v-if="authStore.isLoggedIn" to="/profile" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-primary-100/70 dark:hover:bg-primary-500/20">👤 个人主页</NuxtLink>
       <div class="px-3 py-2">
         <input v-model="searchText" @keyup.enter="doSearch" placeholder="搜索文章" class="w-full px-3 py-1.5 rounded-full border text-sm dark:bg-gray-800 dark:border-gray-600 focus:outline-none" />
       </div>
@@ -132,16 +150,31 @@ const authStore = useAuthStore()
 const colorMode = useColorMode()
 const router = useRouter()
 const searchText = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
 const mobileOpen = ref(false)
 const logoFlipped = ref(false)
 const settingsOpen = ref(false)
+const userOpen = ref(false)
 
 const hidden = ref(false)
 let lastScrollY = 0
 
+function handleLogout() {
+  userOpen.value = false
+  authStore.logout()
+  router.push('/')
+}
+
 onMounted(() => {
   lastScrollY = window.scrollY
   window.addEventListener('scroll', handleScroll, { passive: true })
+  // Ctrl+K / Cmd+K 聚焦搜索框
+  window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault()
+      searchInput.value?.focus()
+    }
+  })
   const saved = localStorage.getItem('accent-hue')
   if (saved) { accentHue.value = Number(saved); applyHue(Number(saved)) }
   const w = localStorage.getItem('bg-warmth')
@@ -206,6 +239,7 @@ const { viewMode: layout, setViewMode: setLayout, sortMode: sort, setSortMode: s
 
 function doSearch() {
   mobileOpen.value = false
+  userOpen.value = false
   if (searchText.value.trim()) {
     router.push(`/?keyword=${encodeURIComponent(searchText.value.trim())}`)
   }

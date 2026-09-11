@@ -32,6 +32,13 @@
               <ReadingTime :content="currentArticle?.contentMd || ''" />
               <span>📝 {{ wordCount }} 字</span>
               <span>💬 {{ currentArticle.commentCount || 0 }} 评论</span>
+              <button v-if="authStore.isLoggedIn" @click="aiSummarize"
+                class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-primary-600 text-white hover:bg-primary-700 transition"
+                :disabled="aiSummaryLoading">
+                <svg v-if="aiSummaryLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+                <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
+                {{ aiSummaryLoading ? '总结中...' : 'AI 总结' }}
+              </button>
             </div>
           </div>
 
@@ -144,6 +151,19 @@
         </div>
       </main>
     </div>
+
+    <!-- 选中文本：AI 解释工具条（Teleport 放在根节点内，保证页面单根，避免过渡卡死） -->
+    <Teleport to="body">
+      <Transition name="sel-pop">
+        <button v-if="selBox && authStore.isLoggedIn" @click="explainSelection" :disabled="explainLoading"
+          class="fixed z-[75] px-3 py-1.5 rounded-full bg-gray-900 dark:bg-gray-700 text-white text-xs shadow-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition flex items-center gap-1.5 -translate-x-1/2 -translate-y-full -mt-2"
+          :style="{ left: selPos.x + 'px', top: selPos.y + 'px' }">
+          <svg v-if="explainLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+          <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
+          {{ explainLoading ? '分析中...' : 'AI 解释这段' }}
+        </button>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -151,11 +171,87 @@
 const route = useRoute()
 const { get } = useApi()
 const authStore = useAuthStore()
+const aiChat = useAiChat()
+const aiSummaryLoading = ref(false)
 
-const { data: articleRaw, pending, error } = await useAsyncData(`article-${route.params.id}`, async () => {
-  const res = await get<any>(`/article/${route.params.id}`)
-  if (res.code === 200) return res.data
-  throw new Error(res.message || '文章不存在')
+/** AI 总结本文：取全文（截断过长），走自由问答 */
+async function aiSummarize() {
+  const md = currentArticle.value?.contentMd || ''
+  if (!md.trim() || aiSummaryLoading.value) return
+  aiSummaryLoading.value = true
+  try {
+    aiChat.openPanel()
+    const content = md.length > 18000 ? md.slice(0, 18000) : md
+    await aiChat.freeAsk(
+      `请用 Markdown 总结下面这篇博客文章，输出：\n## 核心内容\n## 主要知识点\n## 适合人群\n## 学习重点\n\n文章标题：${currentArticle.value?.title || ''}\n\n文章内容：\n${content}`
+    )
+  } finally {
+    aiSummaryLoading.value = false
+  }
+}
+
+/* ---- 选中代码「解释这段」工具条 ---- */
+const selBox = ref(false)
+const selText = ref('')
+const selPos = reactive({ x: 0, y: 0 })
+const explainLoading = ref(false)
+
+onMounted(() => {
+  document.addEventListener('mouseup', handleSelect)
+  document.addEventListener('scroll', hideSelBox, true)
+})
+onUnmounted(() => {
+  document.removeEventListener('mouseup', handleSelect)
+  document.removeEventListener('scroll', hideSelBox, true)
+})
+
+function handleSelect() {
+  const s = window.getSelection()
+  const text = s ? s.toString().trim() : ''
+  // 内容过短或跨出正文区域不显示
+  if (!text || text.length < 10 || text.length > 4000) { selBox.value = false; return }
+  const range = s.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+  if (!rect || (rect.width === 0 && rect.height === 0)) { selBox.value = false; return }
+  selText.value = text
+  selPos.x = rect.left + rect.width / 2
+  selPos.y = rect.top
+  selBox.value = true
+}
+
+function hideSelBox() { selBox.value = false }
+
+async function explainSelection() {
+  const text = selText.value
+  selBox.value = false
+  if (!text || explainLoading.value) return
+  explainLoading.value = true
+  try {
+    aiChat.openPanel()
+    await aiChat.freeAsk(`请解释下面这段代码（或文本）的作用、执行流程、关键方法与易错点，用 Markdown 输出：\n\n${text}`)
+  } finally {
+    explainLoading.value = false
+  }
+}
+
+const { data: articleRaw, pending, error } = await useAsyncData(
+  `article-${route.params.id}`,
+  async () => {
+    const res = await get<any>(`/article/${route.params.id}`)
+    if (res.code === 200) return res.data
+    throw new Error(res.message || '文章不存在')
+  },
+  {
+    // 客户端路由导航（上一篇/下一篇）时自动重新拉取
+    watch: [() => route.params.id]
+  }
+)
+
+// 路由参数变化时刷新评论/上下篇/相关推荐（asyncData 由上方 watch 自动重新拉取）
+watch(() => route.params.id, () => {
+  fetchComments()
+  fetchNeighbors()
+  fetchRelated()
 })
 const article = computed(() => (articleRaw.value as any)?.article)
 const articleTags = computed(() => (articleRaw.value as any)?.tags || [])

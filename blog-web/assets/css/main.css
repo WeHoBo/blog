@@ -245,3 +245,32 @@ pre.hljs:hover .code-copy-btn { opacity: 1; }
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* 移动端抽屉动画 */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity 0.25s ease;
+}
+.drawer-enter-active > div:last-child,
+.drawer-leave-active > div:last-child {
+  transition: transform 0.25s ease;
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+}
+.drawer-enter-from > div:last-child,
+.drawer-leave-to > div:last-child {
+  transform: translateY(100%);
+}
+
+/* 选中文本解释工具条动画 */
+.sel-pop-enter-active,
+.sel-pop-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.sel-pop-enter-from,
+.sel-pop-leave-to {
+  opacity: 0;
+  transform: translateY(2px);
+}

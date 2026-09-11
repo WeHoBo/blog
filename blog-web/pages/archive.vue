@@ -26,10 +26,12 @@ const archives = ref<any[]>([])
 const loading = ref(true)
 
 const { data } = await useAsyncData('archive', async () => {
-  const res = await get<any>('/article/archive')
-  if (res.code === 200 && res.data) {
-    archives.value = res.data.archives || []
-  }
+  try {
+    const res = await get<any>('/article/archive')
+    if (res.code === 200 && res.data) {
+      archives.value = res.data.archives || []
+    }
+  } catch { /* 容错 */ }
   loading.value = false
 })
 

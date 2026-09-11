@@ -1,0 +1,149 @@
+/* 全局样式：简洁清爽的浅色卡片风格，无第三方 UI 库 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  background: #f0f2f5;
+  color: #1f2329;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  height: 56px;
+  background: #fff;
+  border-bottom: 1px solid #e5e6eb;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.topbar .logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #4f7cff, #7b5cff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.topbar h1 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.topbar .sub {
+  font-size: 12px;
+  color: #8a919f;
+  margin-left: 6px;
+}
+
+/* ---------- 主体两栏布局 ---------- */
+.main {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e5e6eb;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-left {
+  width: 360px;
+  flex-shrink: 0;
+}
+
+.panel-right {
+  flex: 1;
+}
+
+.panel-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #f0f1f3;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ---------- 通用按钮 ---------- */
+.btn {
+  border: 1px solid #d9dce1;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover {
+  border-color: #4f7cff;
+  color: #4f7cff;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #4f7cff;
+  border-color: #4f7cff;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #3d6bf5;
+  color: #fff;
+}
+
+.btn-danger {
+  color: #e5484d;
+  border-color: #f2c5c6;
+}
+
+.btn-danger:hover {
+  border-color: #e5484d;
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d0d3d9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b6bac2;
+}

@@ -1,20 +1,23 @@
 ﻿<template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col relative">
-    <div v-if="bgImage" class="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30 dark:opacity-20" :style="{ backgroundImage: `url(${bgImage})` }"></div>
+    <div v-if="bgImage" class="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-15 dark:opacity-10" :style="{ backgroundImage: `linear-gradient(rgba(255,255,255,0.5), rgba(255,255,255,0.5)), url(${bgImage})` }"></div>
     <StarryBackground v-else />
-    <canvas ref="trailCanvas" class="fixed inset-0 pointer-events-none z-40"></canvas>
+    <canvas ref="trailCanvas" class="fixed inset-0 pointer-events-none z-40 opacity-40"></canvas>
     <FestivalEffect />
-    <div class="fixed pointer-events-none z-0 opacity-30 dark:opacity-10" :style="glowStyle" style="width:600px;height:600px;border-radius:50%;background:radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);transform:translate(-50%,-50%);transition:opacity 0.3s"></div>
+    <div class="fixed pointer-events-none z-0 opacity-20 dark:opacity-10" :style="glowStyle" style="width:600px;height:600px;border-radius:50%;background:radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);transform:translate(-50%,-50%);transition:opacity 0.3s"></div>
     <!-- Reading progress bar -->
     <div class="fixed top-0 left-0 z-50 h-0.5 bg-gradient-to-r from-primary-500 to-primary-500 transition-all" :style="{ width: progress + '%' }"></div>
     <div class="relative z-10 flex flex-col flex-1">
       <Header />
-      <main class="flex-1 px-4">
+      <main class="flex-1 px-4 pt-16 lg:pt-20">
         <slot />
       </main>
       <Footer />
     </div>
-    <button @click="scrollToTop" v-show="showTopBtn" class="fixed bottom-6 right-6 z-50 w-10 h-10 rounded-full bg-primary-600 text-white shadow-lg hover:bg-primary-700 transition flex items-center justify-center text-lg" title="返回顶部">↑</button>
+    <ClientOnly>
+      <AiFloat />
+    </ClientOnly>
+    <button @click="scrollToTop" v-show="showTopBtn" class="fixed bottom-24 right-6 z-[60] w-10 h-10 rounded-full bg-primary-600 text-white shadow-lg hover:bg-primary-700 transition flex items-center justify-center text-lg" title="返回顶部">↑</button>
   </div>
 </template>
 
