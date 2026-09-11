@@ -12,8 +12,8 @@
       <p class="text-sm text-gray-500 dark:text-gray-400 mb-8">
         {{ error?.statusCode === 404 ? '你访问的页面不存在或已被移动。' : '请稍后重试，或返回首页看看。' }}
       </p>
-      <!-- 调试信息：真实错误（帮助定位） -->
-      <div v-if="error?.message && error?.statusCode !== 404" class="text-xs text-gray-400 dark:text-gray-500 mb-6 bg-gray-100 dark:bg-gray-800 rounded-lg px-3 py-2 text-left max-h-40 overflow-y-auto break-all">
+      <!-- 调试信息：仅在开发环境展示，生产环境不输出 message / 堆栈，避免泄露内部实现 -->
+      <div v-if="isDev && error?.message && error?.statusCode !== 404" class="text-xs text-gray-400 dark:text-gray-500 mb-6 bg-gray-100 dark:bg-gray-800 rounded-lg px-3 py-2 text-left max-h-40 overflow-y-auto break-all">
         <p>{{ error.message }}</p>
         <p v-if="(error as any)?.cause?.stack" class="mt-1 opacity-70 whitespace-pre-wrap">{{ (error as any).cause.stack }}</p>
       </div>
@@ -33,6 +33,9 @@
 import type { NuxtError } from '#app'
 
 const props = defineProps<{ error: NuxtError | null }>()
+
+// 仅开发环境展示真实错误信息；生产环境构建时该常量会被替换为 false，调试块整体被摇掉
+const isDev = import.meta.dev
 
 function handleError() {
   if (props.error?.statusCode === 404) {

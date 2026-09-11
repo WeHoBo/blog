@@ -71,6 +71,12 @@ public class ArticleService {
             wrapper.orderByDesc(Article::getIsTop)
                     .orderByDesc(Article::getCreateTime);
         }
+        // 列表只需要展示字段，显式排除 content_md / content_html 两个 LONGTEXT，
+        // 否则每次翻页都会把整页文章的正文全文从数据库读回内存
+        wrapper.select(Article::getId, Article::getTitle, Article::getSummary, Article::getCover,
+                Article::getViewCount, Article::getCommentCount, Article::getIsTop,
+                Article::getCategoryId, Article::getCreateTime, Article::getWordCount,
+                Article::getUserId);
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 
@@ -88,6 +94,13 @@ public class ArticleService {
         }
         wrapper.orderByDesc(Article::getIsTop)
                 .orderByDesc(Article::getCreateTime);
+        // 后台列表同样只取元信息：排除 content_md / content_html / password 三个大字段
+        wrapper.select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary,
+                Article::getCover, Article::getStatus, Article::getUserId, Article::getCategoryId,
+                Article::getSeries, Article::getIsTop, Article::getViewCount,
+                Article::getCommentCount, Article::getLikeCount, Article::getWordCount,
+                Article::getIsDeleted, Article::getIsEncrypted, Article::getVisibility,
+                Article::getCreateTime, Article::getUpdateTime);
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 
@@ -253,7 +266,9 @@ public class ArticleService {
         if (article == null || article.getCategoryId() == null) {
             return List.of();
         }
+        // 相关推荐只渲染标题/封面/时间，不返回正文，避免响应体里塞进 4 篇完整文章
         return articleMapper.selectList(new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getTitle, Article::getCover, Article::getCreateTime)
                 .eq(Article::getCategoryId, article.getCategoryId())
                 .eq(Article::getStatus, 1)
                 .eq(Article::getVisibility, 0)
