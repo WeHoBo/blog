@@ -1,0 +1,20 @@
+[Unit]
+Description=好啵博客 API
+After=network.target mysql.service redis.service
+
+[Service]
+Type=simple
+User=ecs-user
+WorkingDirectory=/opt/blog
+EnvironmentFile=/opt/blog/blog.env
+# jar 名需与 deploy.sh 中的 JAR_DST 保持一致
+ExecStart=/usr/bin/java -jar /opt/blog/blog-api.jar --spring.profiles.active=prod --spring.config.location=/opt/blog/application-prod.yml
+Restart=always
+RestartSec=5
+# 业务日志由 logback-spring.xml 写 /opt/blog/logs（按天滚动）。
+# stdout/stderr（JVM 崩溃/OOM 输出）保持默认走 journald，避免 systemd
+# StandardOutput=append: 依赖 systemd>=240（阿里云 Linux 3 是 239，会加载失败）。
+# 查看：journalctl -u blog-api
+
+[Install]
+WantedBy=multi-user.target

@@ -23,6 +23,9 @@ spring:
     redis:
       host: localhost
       port: 6379
+      # 生产必须设置 REDIS_PASSWORD（或 application-prod.yml 的 spring.data.redis.password），
+      # 并与 redis.conf 的 requirepass 一致。为空则不启用 AUTH（仅适合本机开发）。
+      password: ${REDIS_PASSWORD:}
       timeout: 3000ms
   servlet:
     multipart:
@@ -34,6 +37,10 @@ spring:
       request-timeout: 300s
 
 logging:
+  # 日志文件目录：logback-spring.xml 通过 springProperty 读取此值。
+  # 生产环境在 application-prod.yml 覆盖为 /opt/blog/logs（该目录须对运行用户可写）。
+  file:
+    path: ${LOG_PATH:./logs}
   level:
     com.blog.common.mapper: WARN
     org.mybatis: WARN
@@ -67,6 +74,8 @@ springdoc:
       packages-to-scan: com.blog.front.controller
 
 jwt:
+  # 此默认值仅供本地开发。生产必须在 application-prod.yml / 环境变量 JWT_SECRET 中覆盖。
+  # JwtUtils 启动时会校验：缺失、空白或短于 32 字节一律直接启动失败。
   secret: ${JWT_SECRET:blog-dev-only-secret-0123456789abcdef0123456789abcdef}
   expiration: 86400000
 

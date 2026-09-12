@@ -1,0 +1,52 @@
+# 好啵博客 —— 本机 / 全新服务器的 MySQL + Redis 中间件
+#
+# 使用前请先在同目录创建 .env（参考 .env.example），否则 compose 会直接报错退出，
+# 避免出现「用占位弱密码把库跑起来」的情况。
+#
+#   cd deploy && cp .env.example .env && vi .env && docker-compose up -d
+#
+# 注意：端口只绑 127.0.0.1，不暴露到公网。应用与中间件同机时这是最稳的做法。
+
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: blog-mysql
+    restart: always
+    environment:
+      # 未设置即报错退出（不再使用 your_mysql_password 这类占位词）
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 deploy/.env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: blog
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --slow-query-log=1
+      - --long-query-time=1
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+      # blog.sql 已是整合后的完整 schema（含 article_revision / publish_at /
+      # upload_file / oauth 字段等），全新库只需要它一个。
+      # 历史遗留的 oauth-alter.sql / encrypt-alter.sql 不要再挂：
+      #   * oauth-alter.sql 在全新库上会报 "Duplicate column name"
+      #   * encrypt-alter.sql 已随「私密文章功能下线」删除
+      - ../blog-server/sql/blog.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    container_name: blog-redis
+    restart: always
+    # requirepass：未设置即报错退出；同时开启 AOF 持久化，避免重启丢 OAuth state / 缓存
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?请在 deploy/.env 中设置 REDIS_PASSWORD}
+      - --appendonly
+      - "yes"
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./redis-data:/data

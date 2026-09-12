@@ -24,12 +24,22 @@ Thumbs.db
 
 # Spring Boot
 *.log
+logs/
 
 # Uploads
 uploads/
 
-# Secrets & deployment
-deploy/
+# 部署目录：deploy/ 本身要纳入版本库
+# （deploy.sh / nginx.conf / *.service 是"部署真相"，只存在单机磁盘上会失传）。
+# 仅忽略其中含真实密钥、本机数据或运行时产物的内容。
+deploy/.env
+deploy/*.env
+deploy/application-prod.yml
+deploy/*.bak-*
+deploy/mysql-data/
+deploy/redis-data/
+deploy/logs/
+deploy/__pycache__/
 *.real
 *.yml.real
 application-local.yml
