@@ -10,7 +10,7 @@
           {{ yearItem.year }}年{{ monthItem.month }}月 ({{ monthItem.count }}篇)
         </h3>
         <div class="space-y-1">
-          <NuxtLink v-for="a in monthItem.articles" :key="a.id" :to="a.slug ? `/post/${a.slug}` : `/article/${a.id}`" class="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition text-sm group">
+          <NuxtLink v-for="a in monthItem.articles" :key="a.id" :to="articlePath(a)" class="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition text-sm group">
             <span class="text-xs text-gray-400 w-20 flex-shrink-0">{{ a.createTime?.substring(5) }}</span>
             <span class="text-gray-700 dark:text-gray-300 group-hover:text-primary-600 dark:group-hover:text-primary-400 line-clamp-1">{{ a.title }}</span>
           </NuxtLink>
@@ -21,6 +21,9 @@
 </template>
 
 <script setup lang="ts">
+// 文章链接统一走 articlePath()
+import { articlePath } from '~/utils/articlePath'
+
 const { get } = useApi()
 const archives = ref<any[]>([])
 const loading = ref(true)

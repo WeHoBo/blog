@@ -155,7 +155,7 @@
             <div v-show="mobileAsideOpen" class="px-4 pb-4">
               <!-- 热门文章 -->
               <div v-if="hotArticles.length" class="space-y-1 mb-3">
-                <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="a.slug ? `/post/${a.slug}` : `/article/${a.id}`"
+                <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="articlePath(a)"
                   class="flex items-start gap-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
                   <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
                   <span class="flex-1 min-w-0 text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug">{{ a.title }}</span>
@@ -163,7 +163,7 @@
               </div>
               <!-- 热门标签 -->
               <div v-if="hotTags.length" class="flex flex-wrap gap-1.5 pt-3 border-t dark:border-gray-700">
-                <NuxtLink v-for="t in hotTags" :key="t.id" :to="`/?tagId=${t.id}`"
+                <NuxtLink v-for="t in hotTags" :key="t.id" :to="taxonomyPath('/tag', t)"
                   class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
                   {{ t.name }}
                   <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
@@ -171,6 +171,20 @@
               </div>
             </div>
           </div>
+
+          <!-- 窄屏同样给一个源码入口（右侧栏在 xl 以下是隐藏的） -->
+          <a href="https://github.com/WeHoBo/blog" target="_blank" rel="noopener noreferrer"
+            class="mt-3 flex items-start gap-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 hover:shadow-md transition group">
+            <span class="w-8 h-8 flex-shrink-0 rounded-full bg-gray-900 dark:bg-gray-100 flex items-center justify-center text-white dark:text-gray-900">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+              </svg>
+            </span>
+            <span class="flex-1 min-w-0">
+              <span class="block text-sm font-bold text-gray-900 dark:text-gray-100">开源仓库 · WeHoBo/blog</span>
+              <span class="block text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">本站源码已开源，欢迎阅读、Star 与提 Issue。</span>
+            </span>
+          </a>
         </div>
       </main>
 
@@ -199,13 +213,35 @@
             </div>
           </div>
 
+          <!-- GitHub 仓库：给想自己读源码 / 本地跑一遍的读者一个入口 -->
+          <a href="https://github.com/WeHoBo/blog" target="_blank" rel="noopener noreferrer"
+            class="block bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden mb-4 p-4 hover:shadow-md transition group">
+            <div class="flex items-center gap-3">
+              <span class="w-9 h-9 flex-shrink-0 rounded-full bg-gray-900 dark:bg-gray-100 flex items-center justify-center text-white dark:text-gray-900">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+                </svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-bold text-gray-900 dark:text-gray-100">开源仓库</div>
+                <div class="text-xs text-gray-400 truncate">WeHoBo/blog</div>
+              </div>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-3 leading-relaxed">
+              本站前端 Nuxt 3、后端 Spring Boot 3 与 RAG 知识库源码已全部开源，欢迎阅读、Star 与提 Issue。
+            </p>
+            <span class="inline-flex items-center gap-1 mt-2.5 text-xs font-medium text-primary-600 dark:text-primary-400 group-hover:gap-2 transition-all">
+              查看源码 <span aria-hidden="true">→</span>
+            </span>
+          </a>
+
           <!-- Hot articles -->
           <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
             <div class="px-4 py-3 border-b dark:border-gray-700">
               <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门文章</h3>
             </div>
             <div class="p-3 space-y-1">
-              <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="a.slug ? `/post/${a.slug}` : `/article/${a.id}`" class="flex items-start gap-2 py-2 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
+              <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="articlePath(a)" class="flex items-start gap-2 py-2 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
                 <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
                 <span class="flex-1 min-w-0">
                   <span class="text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug hover:text-primary-600 dark:hover:text-primary-400 transition">{{ a.title }}</span>
@@ -221,7 +257,7 @@
               <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门标签</h3>
             </div>
             <div class="p-3 flex flex-wrap gap-1.5">
-              <NuxtLink v-for="t in hotTags" :key="t.id" :to="`/?tagId=${t.id}`"
+              <NuxtLink v-for="t in hotTags" :key="t.id" :to="taxonomyPath('/tag', t)"
                 class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
                 {{ t.name }}
                 <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
@@ -274,6 +310,12 @@
 </template>
 
 <script setup lang="ts">
+// 标签改跳独立落地页 /tag/{slug}，而不是回退到首页的 ?tagId= 过滤
+// （聚合页此前没有独立 URL，等于把 SEO 权重都让给了首页）
+import { taxonomyPath } from '~/utils/taxonomy'
+// 文章链接统一走 articlePath()，避免 /post/{slug} 与 /article/{id} 混用
+import { articlePath } from '~/utils/articlePath'
+
 const { get } = useApi()
 const route = useRoute()
 const router = useRouter()

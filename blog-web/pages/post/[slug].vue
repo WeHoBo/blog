@@ -1,50 +1,47 @@
 ﻿<template>
   <div class="max-w-7xl mx-auto py-6">
-    <div class="flex gap-6">
-      <main class="flex-1 min-w-0">
-        <div v-if="pending" class="flex justify-center py-32">
-          <div class="animate-spin h-8 w-8 border-2 border-primary-600 border-t-transparent rounded-full"></div>
-        </div>
-        <div v-else-if="error || !article" class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-20 text-center text-gray-400">
-          <span class="text-5xl mb-4 block">🔍</span>文章不存在或已被删除
-        </div>
-        <article v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-          <div class="px-6 sm:px-10 pt-8">
-            <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4 neon-glow">{{ article.title }}</h1>
-            <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-400 mb-6 pb-6 border-b dark:border-gray-700">
-              <span>{{ article.createTime?.substring(0, 10) }}</span>
-              <span>👁 {{ article.viewCount }} 阅读</span>
-              <span>💬 {{ article.commentCount || 0 }} 评论</span>
-            </div>
-          </div>
-          <div class="px-6 sm:px-10 py-8">
-            <MarkdownRenderer :content="article.contentMd || ''" />
-          </div>
-        </article>
-        <div class="mt-6">
-          <NuxtLink to="/" class="inline-flex items-center gap-1 text-primary-600 dark:text-primary-400 hover:underline text-sm font-medium">← 返回首页</NuxtLink>
-        </div>
-      </main>
+    <div v-if="pending" class="flex justify-center py-32">
+      <div class="animate-spin h-8 w-8 border-2 border-primary-600 border-t-transparent rounded-full"></div>
     </div>
+    <div v-else-if="!article" class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-20 text-center text-gray-400">
+      <span class="text-5xl mb-4 block">🔍</span>
+      文章不存在或已被删除
+    </div>
+    <!-- 与 /article/{id} 共用同一个组件，两条路由的展示完全一致 -->
+    <ArticleDetail v-else :article="article" :tags="tags" :author="author" />
   </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * /post/{slug} —— 站内的规范文章 URL（canonical 指向这里）。
+ *
+ * 历史上这个页面是一份"精简实现"（只有标题+正文），而功能完整的那份在
+ * /article/{id}，于是同一篇文章从首页进来和从 RAG 引用进来长得完全不一样。
+ * 现在两者都渲染 ArticleDetail，展示一致；这里只保留「按 slug 取数 + SEO」。
+ */
 const route = useRoute()
 const { get } = useApi()
 
 const SITE_URL = 'https://codeup.asia'
 
-const { data: articleData, pending, error } = await useAsyncData(`post-${route.params.slug}`, async () => {
+const { data, pending } = await useAsyncData(`post-${route.params.slug}`, async () => {
   const res = await get<any>(`/article/post/${route.params.slug}`)
-  if (res.code === 200 && res.data) return res.data.article || res.data
+  if (res.code === 200 && res.data) {
+    // 详情接口返回 { article, tags, author }
+    const d = res.data
+    return { article: d.article || d, tags: (d.tags || []) as any[], author: d.author || null }
+  }
   throw new Error('文章不存在')
 }, {
   // 客户端在 /post/a → /post/b 之间导航时自动重新拉取
   watch: [() => route.params.slug]
 })
 
-const article = computed(() => articleData.value as any)
+const article = computed(() => (data.value as any)?.article || null)
+const tags = computed<any[]>(() => (data.value as any)?.tags || [])
+const author = computed(() => (data.value as any)?.author || null)
+
 const canonicalUrl = computed(() => `${SITE_URL}/post/${route.params.slug}`)
 
 // 这个 URL 最规范，此前却完全没有 SEO meta：补上 title/description/og，

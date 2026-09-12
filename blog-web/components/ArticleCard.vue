@@ -1,5 +1,5 @@
 <template>
-  <NuxtLink :to="article.slug ? `/post/${article.slug}` : `/article/${article.id}`"
+  <NuxtLink :to="articlePath(article)"
     class="block bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600 transition-all duration-200 overflow-hidden group hover:-translate-y-0.5 hover:shadow-md"
     :class="layout === 'grid' ? 'flex flex-col h-full' : ''">
     <!-- 网格模式：顶部插图 + 下方信息 -->
@@ -65,6 +65,9 @@
 </template>
 
 <script setup lang="ts">
+// 文章链接统一走 articlePath()：避免各处手写模板串导致 /post/{slug} 与 /article/{id} 混用
+import { articlePath } from '~/utils/articlePath'
+
 withDefaults(defineProps<{
   article: { id: number; title: string; slug?: string; summary: string; cover: string; isTop: number; viewCount: number; commentCount: number; createTime: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
   layout?: 'list' | 'grid'

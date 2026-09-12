@@ -542,20 +542,59 @@ public class ArticleService {
     // 相邻文章 / 相关推荐
     // =================================================================
 
+    /** 相关推荐条数上限 */
+    private static final int RELATED_SIZE = 4;
+
+    /**
+     * 「相关推荐」候选查询的公共部分：列白名单 + 只取已发布未删除。
+     * 列白名单是必须的 —— selectById / 无 select 的查询会把 content_md、content_html（LONGTEXT）
+     * 一起拉出来，4 篇推荐白白带上几百 KB 的正文。
+     */
+    private LambdaQueryWrapper<Article> recommendBase() {
+        return new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCover,
+                        Article::getSummary, Article::getViewCount, Article::getCreateTime)
+                .eq(Article::getStatus, 1)
+                .eq(Article::getIsDeleted, 0);
+    }
+
+    /**
+     * 相关推荐。
+     * <p>
+     * 先取同分类的其它文章；**不足 4 篇时用最新文章补齐**。
+     * 之前的实现只在 article.categoryId 非空且同分类下还有别的文章时才返回数据，
+     * 于是「未分类」的文章、或分类里只有一篇的文章，文末的推荐区整块不显示 ——
+     * 读者读到结尾就断了，没有任何下一步入口。
+     */
     public List<Article> related(Long id) {
-        Article article = articleMapper.selectById(id);
-        if (article == null || article.getCategoryId() == null) {
+        Article article = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getCategoryId)
+                .eq(Article::getId, id));
+        if (article == null) {
             return List.of();
         }
-        // 相关推荐只渲染标题/封面/时间，不返回正文，避免响应体里塞进 4 篇完整文章
-        return articleMapper.selectList(new LambdaQueryWrapper<Article>()
-                .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCover, Article::getCreateTime)
-                .eq(Article::getCategoryId, article.getCategoryId())
-                .eq(Article::getStatus, 1)
-                .eq(Article::getIsDeleted, 0)
-                .ne(Article::getId, id)
-                .orderByDesc(Article::getCreateTime)
-                .last("LIMIT 4"));
+
+        List<Article> result = new ArrayList<>();
+        if (article.getCategoryId() != null) {
+            result.addAll(articleMapper.selectList(recommendBase()
+                    .eq(Article::getCategoryId, article.getCategoryId())
+                    .ne(Article::getId, id)
+                    .orderByDesc(Article::getCreateTime)
+                    .last("LIMIT " + RELATED_SIZE)));
+        }
+
+        if (result.size() < RELATED_SIZE) {
+            List<Long> excludeIds = new ArrayList<>();
+            excludeIds.add(id);
+            for (Article a : result) {
+                excludeIds.add(a.getId());
+            }
+            result.addAll(articleMapper.selectList(recommendBase()
+                    .notIn(Article::getId, excludeIds)
+                    .orderByDesc(Article::getCreateTime)
+                    .last("LIMIT " + (RELATED_SIZE - result.size()))));
+        }
+        return result;
     }
 
     /**

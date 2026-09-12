@@ -139,7 +139,11 @@ class VectorStore:
                 hit["title"] = meta.get("title", "")
                 hit["slug"] = meta.get("slug", "")
                 hit["category"] = meta.get("category", "")
-                hit["url"] = f"/article/{meta.get('article_id')}"
+                # 引用链接优先用 slug（站内规范 URL /post/{slug}，页面 canonical 也是它）；
+                # 元信息里没有 slug 的老数据才退回 /article/{id}。
+                # 两条路由现在渲染同一个详情组件，所以无论走哪条展示都是一致的。
+                _slug = str(meta.get("slug") or "").strip()
+                hit["url"] = f"/post/{_slug}" if _slug else f"/article/{meta.get('article_id')}"
             else:
                 hit["source_type"] = "pdf"
             hits.append(hit)

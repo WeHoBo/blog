@@ -167,24 +167,67 @@ strong, b { color: #1f2937; }
   font-weight: 600;
 }
 .dark .code-lang-label { background: rgba(59,130,246,0.15); }
+/* 有 title= 时标签展示的是文件名：不该被转成大写，用等宽字体更像"文件名" */
+.code-lang-label.is-file {
+  text-transform: none;
+  font-family: 'Consolas', 'Monaco', 'Fira Code', 'Courier New', monospace;
+  letter-spacing: 0;
+  /* 长路径别顶到右上角的按钮组 */
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 行高亮（围栏元信息 {3-5}）：左侧色条 + 淡底，暗色下同色加深 */
+.code-wrapper .line.line-highlight {
+  background: rgba(59,130,246,0.10);
+  box-shadow: inset 3px 0 0 0 #3b82f6;
+}
+.dark .code-wrapper .line.line-highlight { background: rgba(59,130,246,0.16); }
+
+/* 超长代码块默认折叠：底部渐隐 + 右上角「展开」按钮 */
+.code-wrapper.code-collapsed pre.hljs {
+  max-height: 22rem;
+  overflow-y: hidden;
+}
+.code-wrapper.code-collapsed::after {
+  content: '';
+  position: absolute; left: 1px; right: 1px; bottom: 1px; height: 4rem;
+  pointer-events: none;
+  border-radius: 0 0 12px 12px;
+  background: linear-gradient(to bottom, rgba(254,252,245,0), #fefcf5);
+}
+.dark .code-wrapper.code-collapsed::after {
+  background: linear-gradient(to bottom, rgba(26,29,35,0), #1a1d23);
+}
+
+/* 「换行」开关：打开后长行折行显示，不再横向滚动 */
+.code-wrapper.code-wrap pre.hljs { white-space: pre-wrap; word-break: break-word; }
 
 /* Mermaid */
 .mermaid-wrapper { @apply my-4 cursor-pointer; }
 .mermaid-wrapper svg { max-width: 100%; height: auto; }
 .article-content :not(pre) > code { @apply bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-md px-1.5 py-0.5 text-sm font-mono; }
 
-.code-copy-btn {
+/* 代码块右上角按钮组（复制 / 换行 / 展开） */
+.code-actions {
   position: absolute; top: 8px; right: 8px;
-  padding: 2px 8px; font-size: 11px; border-radius: 6px;
-  background: #374151; color: #d1d5db; border: none; cursor: pointer;
+  display: flex; gap: 6px; z-index: 3;
   opacity: 0; transition: opacity 0.2s;
 }
-pre.hljs:hover .code-copy-btn { opacity: 1; }
-/* 触屏设备没有 hover 事件：复制按钮常显，否则手机上永远点不到复制 */
+.code-wrapper:hover .code-actions { opacity: 1; }
+/* 触屏设备没有 hover 事件：按钮常显，否则手机上永远点不到 */
 @media (hover: none) {
-  .code-copy-btn { opacity: 1; }
+  .code-actions { opacity: 1; }
 }
-.code-copy-btn:hover { background: #4b5563; color: white; }
+.code-action-btn {
+  padding: 2px 8px; font-size: 11px; border-radius: 6px;
+  background: #374151; color: #d1d5db; border: none; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.code-action-btn:hover { background: #4b5563; color: white; }
+.code-action-btn.is-active { background: #2563eb; color: white; }
 
 /* Footnote styles */
 .article-content .footnotes { @apply mt-10 pt-6 border-t dark:border-gray-700 text-sm; }
@@ -338,4 +381,86 @@ pre.hljs:hover .code-copy-btn { opacity: 1; }
 .sel-pop-leave-to {
   opacity: 0;
   transform: translateY(2px);
+}
+
+/* ===================================================================
+   正文图片灯箱（utils/imageLightbox.ts）
+   覆盖层挂在 document.body 上，所以不受 .article-content 的作用域限制；
+   这里用纯 CSS 变量对齐暗色模式，不依赖 Twind/Tailwind 的 dark: 前缀。
+   =================================================================== */
+.article-img-zoomable {
+  cursor: zoom-in;
+  transition: filter 0.15s ease;
+}
+.article-img-zoomable:hover { filter: brightness(0.96); }
+.dark .article-img-zoomable:hover { filter: brightness(1.06); }
+/* 图片加载失败：显示一个可见的占位提示，而不是让读者看到破图 */
+.article-img-error {
+  min-height: 4rem;
+  background: repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px);
+}
+.dark .article-img-error {
+  background: repeating-linear-gradient(45deg, #1f2937, #1f2937 10px, #374151 10px, #374151 20px);
+}
+
+.img-lightbox {
+  position: fixed; inset: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(9, 11, 15, 0.94);
+  animation: lightbox-in 0.16s ease-out;
+}
+@keyframes lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.img-lightbox-img {
+  max-width: 94vw; max-height: 86vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  user-select: none; -webkit-user-drag: none;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+  cursor: zoom-in;
+}
+/* 缩放过程中不要再有过渡，否则拖拽会明显滞后于手指/鼠标 */
+.img-lightbox-img:active { transition: none; }
+.img-lightbox-img-error {
+  min-width: 12rem; min-height: 8rem;
+  background: repeating-linear-gradient(45deg, #1f2937, #1f2937 10px, #374151 10px, #374151 20px);
+}
+
+.img-lightbox-btn {
+  position: absolute;
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px;
+  border: none; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f3f4f6; font-size: 22px; line-height: 1;
+  cursor: pointer; z-index: 2;
+  transition: background 0.15s ease;
+}
+.img-lightbox-btn:hover { background: rgba(255, 255, 255, 0.26); }
+.img-lightbox-close { top: 18px; right: 20px; font-size: 26px; }
+.img-lightbox-prev { left: 16px; top: 50%; transform: translateY(-50%); }
+.img-lightbox-next { right: 16px; top: 50%; transform: translateY(-50%); }
+
+.img-lightbox-counter {
+  position: absolute; top: 22px; left: 22px; z-index: 2;
+  color: #d1d5db; font-size: 13px; letter-spacing: 0.5px;
+}
+.img-lightbox-caption {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  max-width: 80vw; padding: 5px 14px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55); color: #e5e7eb;
+  font-size: 13px; text-align: center; z-index: 2;
+}
+
+/* 窄屏：左右切换按钮缩小并贴边，给图片留出更多空间 */
+@media (max-width: 640px) {
+  .img-lightbox-img { max-width: 98vw; max-height: 78vh; }
+  .img-lightbox-btn { width: 36px; height: 36px; font-size: 18px; }
+  .img-lightbox-prev { left: 6px; }
+  .img-lightbox-next { right: 6px; }
+  .img-lightbox-caption { bottom: 88px; font-size: 12px; }
 }
