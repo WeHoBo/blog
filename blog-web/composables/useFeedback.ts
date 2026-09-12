@@ -10,6 +10,8 @@ export interface ConfirmState {
   visible: boolean
   title: string
   message: string
+  /** 危险操作（删除等）：确认按钮显示为红色，给用户「有分量」的视觉提示 */
+  danger: boolean
   resolve: ((ok: boolean) => void) | null
 }
 
@@ -26,6 +28,7 @@ const confirmState = ref<ConfirmState>({
   visible: false,
   title: '确认操作',
   message: '',
+  danger: false,
   resolve: null
 })
 
@@ -45,17 +48,17 @@ export function useFeedback() {
 
   function resolveConfirm(ok: boolean) {
     const resolver = confirmState.value.resolve
-    confirmState.value = { visible: false, title: '确认操作', message: '', resolve: null }
+    confirmState.value = { visible: false, title: '确认操作', message: '', danger: false, resolve: null }
     if (resolver) resolver(ok)
   }
 
-  function confirmDialog(message: string, title = '确认操作'): Promise<boolean> {
+  function confirmDialog(message: string, title = '确认操作', danger = false): Promise<boolean> {
     // 同一时间只保留一个确认框：并发调用时先把上一个按「取消」收尾，避免 Promise 永久悬挂
     if (confirmState.value.resolve) {
       resolveConfirm(false)
     }
     return new Promise<boolean>((resolve) => {
-      confirmState.value = { visible: true, title, message, resolve }
+      confirmState.value = { visible: true, title, message, danger, resolve }
     })
   }
 

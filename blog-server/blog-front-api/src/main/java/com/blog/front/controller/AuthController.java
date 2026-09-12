@@ -7,7 +7,6 @@ import com.blog.common.mapper.UserMapper;
 import com.blog.common.vo.LoginVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -16,7 +15,6 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final UserMapper userMapper;
-    private final PasswordEncoder passwordEncoder;
 
     @GetMapping("/me")
     public Result<LoginVO> me() {
@@ -38,11 +36,10 @@ public class AuthController {
         if (profile.getNickname() != null) {
             user.setNickname(profile.getNickname());
         }
+        // 注意：这里刻意不处理密码。账号唯一登录方式是 OAuth（GitHub/Gitee/华为），
+        // 密码登录已下线；若在此继续写密码，只会产生一个永远用不上的凭证。
         if (profile.getAvatar() != null) {
             user.setAvatar(profile.getAvatar());
-        }
-        if (profile.getPassword() != null && !profile.getPassword().isBlank()) {
-            user.setPassword(passwordEncoder.encode(profile.getPassword()));
         }
         userMapper.updateById(user);
         return Result.ok();

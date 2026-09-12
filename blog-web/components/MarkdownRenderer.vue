@@ -32,14 +32,19 @@ const md = new MarkdownIt({
       return '<div class="mermaid-wrapper"><div class="mermaid">' + md.utils.escapeHtml(str) + '</div></div>'
     }
     const label = lang ? `<span class="code-lang-label">${lang}</span>` : ''
+    // markdown-it 传入的代码块内容末尾自带一个 \n；highlight.js 的结果末尾也会补一个 \n。
+    // 不剥离的话，代码块底部会多渲染一个空行，复制出来的代码末尾也会多出换行。
+    const content = str.replace(/\n$/, '')
     if (lang && hljs.getLanguage(lang)) {
       try {
-        const result = hljs.highlight(str, { language: lang, ignoreIllegals: true }).value
-        const lines = result.split('\n').map((l) => `<span class="line"><span class="line-no"></span>${l || '&nbsp;'}</span>`).join('')
+        const result = hljs.highlight(content, { language: lang, ignoreIllegals: true }).value.replace(/\n$/, '')
+        // 空行不再塞 `&nbsp;` 占位：`.line` 的 min-height 已能撑出行高，
+        // 保留占位符会让复制出来的空行里混入不换行空格（U+00A0）。
+        const lines = result.split('\n').map((l) => `<span class="line"><span class="line-no"></span>${l}</span>`).join('')
         return '<div class="code-wrapper">' + label + '<pre class="hljs"><code>' + lines + '</code></pre></div>'
       } catch {}
     }
-    const lines = str.split('\n').map((l) => `<span class="line"><span class="line-no"></span>${md.utils.escapeHtml(l) || '&nbsp;'}</span>`).join('')
+    const lines = content.split('\n').map((l) => `<span class="line"><span class="line-no"></span>${md.utils.escapeHtml(l)}</span>`).join('')
     return '<div class="code-wrapper">' + label + '<pre class="hljs"><code>' + lines + '</code></pre></div>'
   }
 })
@@ -93,7 +98,14 @@ async function enhance(el: HTMLElement) {
     btn.className = 'code-copy-btn'; btn.textContent = '复制'
     btn.setAttribute('aria-label', '复制代码')
     btn.onclick = () => {
-      const code = pre.querySelector('code')?.textContent || ''
+      // 复制时按「行」重建原文并补回 \n：
+      // v-html 渲染出的 <code> 里每行是独立的 block 级 <span class="line">，
+      // 行与行之间没有任何换行符，直接取 textContent 会把整段代码挤成一行。
+      const codeEl = pre.querySelector('code')
+      const lineEls = codeEl ? Array.from(codeEl.querySelectorAll<HTMLElement>('.line')) : []
+      const code = lineEls.length
+        ? lineEls.map((l) => l.textContent || '').join('\n')
+        : (codeEl?.textContent || '')
       const copy = () => { btn.textContent = '✓'; setTimeout(() => btn.textContent = '复制', 2000) }
       if (navigator.clipboard) navigator.clipboard.writeText(code).then(copy)
       else { const t = document.createElement('textarea'); t.value = code; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); copy() }

@@ -35,7 +35,9 @@ const aboutContent = ref('')
 
 const renderedAbout = computed(() => {
   if (!aboutContent.value) return ''
-  return new MarkdownIt({ html: true, linkify: true }).render(aboutContent.value)
+  // html: false —— 与 MarkdownRenderer 保持一致，禁用裸 HTML，避免 v-html 造成存储型 XSS。
+  // 关于页内容支持标准 Markdown（标题/列表/表格/换行等），无需放开任意 HTML。
+  return new MarkdownIt({ html: false, linkify: true }).render(aboutContent.value)
 })
 
 async function fetchLinks() {

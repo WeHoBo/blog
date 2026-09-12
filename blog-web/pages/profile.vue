@@ -29,11 +29,6 @@
         <input v-model="form.nickname" placeholder="你的昵称" class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
       </div>
 
-      <div>
-        <label class="text-sm text-gray-500 mb-1 block">新密码（留空不修改）</label>
-        <input v-model="form.password" type="password" placeholder="输入新密码" class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-      </div>
-
       <p v-if="msg" :class="msgType === 'ok' ? 'text-green-500' : 'text-red-500'" class="text-sm">{{ msg }}</p>
 
       <button @click="handleSave" :disabled="saving" class="px-6 py-2.5 bg-primary-600 text-white rounded-lg font-medium text-sm hover:bg-primary-700 disabled:opacity-50 transition">
@@ -52,8 +47,7 @@ const { toast } = useFeedback()
 
 const form = reactive({
   nickname: authStore.user?.nickname || '',
-  avatar: authStore.user?.avatar || '',
-  password: ''
+  avatar: authStore.user?.avatar || ''
 })
 const msg = ref('')
 const msgType = ref('')

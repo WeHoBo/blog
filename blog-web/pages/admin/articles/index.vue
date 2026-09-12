@@ -117,7 +117,7 @@ async function fetchList() {
 function search() { pageNum.value = 1; fetchList() }
 
 async function handleDelete(id: number) {
-  if (!(await confirmDialog('确定删除这篇文章？删除后无法恢复。'))) return
+  if (!(await confirmDialog('确定删除这篇文章？将移入回收站，可在回收站恢复。', '删除文章', 'danger'))) return
   try {
     await del(`/article/${id}`)
     toast('删除成功', 'success')
@@ -171,7 +171,7 @@ function toggleAll() {
 }
 
 async function handleBatchDelete() {
-  if (!(await confirmDialog(`确定删除选中的 ${selectedIds.value.length} 篇文章？删除后无法恢复。`))) return
+  if (!(await confirmDialog(`确定删除选中的 ${selectedIds.value.length} 篇文章？将移入回收站，可在回收站恢复。`, '批量删除', 'danger'))) return
   try {
     await post('/article/batch-delete', selectedIds.value)
     selectedIds.value = []
