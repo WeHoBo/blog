@@ -23,6 +23,24 @@ public interface ArticleMapper extends BaseMapper<Article> {
             + "GROUP BY category_id")
     List<CategoryArticleCount> countPublishedByCategory();
 
+    /**
+     * 把「还没有分类」的文章统一归属到默认分类（「未建档文章」）。
+     * 走原生 UPDATE，不受 MyBatis-Plus 逻辑删除插件影响 —— 回收站里的历史文章也一并补齐，
+     * 这样从回收站恢复出来的文章同样带着分类。幂等：第一次执行后就没有 category_id IS NULL 的行了。
+     */
+    @Update("UPDATE article SET category_id = #{categoryId} WHERE category_id IS NULL")
+    int assignNullCategory(@Param("categoryId") Long categoryId);
+
+    /**
+     * 级联删除分类时调用：把被删分类（含其子孙）下的文章统一改挂到默认分类。
+     * 走原生 SQL 以覆盖回收站里的文章；不采用「先置 NULL、等下次启动回填」，
+     * 因为分类页文章数按 category_id 聚合，留 NULL 会让这批文章在「未建档文章」里数不到。
+     */
+    @Update("<script>UPDATE article SET category_id = #{categoryId} WHERE category_id IN "
+            + "<foreach collection='categoryIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
+            + "</script>")
+    int reassignCategories(@Param("categoryIds") List<Long> categoryIds, @Param("categoryId") Long categoryId);
+
     // ---------------------------------------------------------------
     // 以下方法用于「回收站」。逻辑删除由 MyBatis-Plus 在自动生成的 SQL 上注入
     // is_deleted = 0，因此常规 BaseMapper 方法根本查不到已删除的行，

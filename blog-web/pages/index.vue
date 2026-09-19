@@ -1,18 +1,48 @@
 ﻿<template>
   <div class="max-w-7xl mx-auto">
-    <!-- 轻量 Hero -->
+    <!-- 轻量 Hero：左侧问候 / 中间站点概览 / 右侧热门标签，把整条横幅填满，避免中间和右侧大片留白 -->
     <div class="px-4 pt-6 pb-1 lg:px-0">
       <div class="rounded-2xl bg-white/60 dark:bg-gray-800/60 backdrop-blur border border-white/50 dark:border-gray-700/60 px-6 sm:px-10 py-8 relative overflow-hidden">
         <div class="absolute -right-10 -top-10 w-48 h-48 rounded-full opacity-15" style="background: radial-gradient(circle, hsl(var(--ph) var(--ps) 60%) 0%, transparent 70%)"></div>
-        <div class="relative">
-          <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-gray-100">你好，我是好啵 👋</h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1.5">记录我的计算机学习与技术实践</p>
-          <div class="flex flex-wrap items-center gap-2 mt-3">
-            <span v-for="t in ['Java', 'AI', 'Python', 'Linux', 'Docker']" :key="t" class="text-xs px-2.5 py-1 rounded-full theme-chip">{{ t }}</span>
+        <div class="relative grid gap-6 lg:gap-8 lg:grid-cols-[1.5fr_1fr_1.1fr] lg:items-center">
+          <!-- 左：问候 + 关注方向 + 行动按钮 -->
+          <div class="min-w-0">
+            <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-gray-100">你好，我是好啵 👋</h1>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1.5">记录我的计算机学习与技术实践</p>
+            <div class="mt-3">
+              <div class="text-[11px] font-bold text-gray-400 mb-1.5 tracking-wide">关注方向</div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span v-for="t in ['Java', 'AI', 'Python', 'Linux', 'Docker']" :key="t" class="text-xs px-2.5 py-1 rounded-full theme-chip">{{ t }}</span>
+              </div>
+            </div>
+            <div class="flex gap-3 mt-4">
+              <a href="#articles" class="px-4 py-1.5 rounded-full bg-primary-600 text-white text-xs font-medium hover:bg-primary-700 transition">开始阅读</a>
+              <NuxtLink to="/about" class="px-4 py-1.5 rounded-full border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition">关于我</NuxtLink>
+            </div>
           </div>
-          <div class="flex gap-3 mt-4">
-            <a href="#articles" class="px-4 py-1.5 rounded-full bg-primary-600 text-white text-xs font-medium hover:bg-primary-700 transition">开始阅读</a>
-            <NuxtLink to="/about" class="px-4 py-1.5 rounded-full border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition">关于我</NuxtLink>
+
+          <!-- 中：站点概览（真实数据，来自首屏 SSR payload） -->
+          <div class="grid grid-cols-3 lg:grid-cols-1 gap-3 lg:gap-2.5 lg:border-l lg:border-gray-200/70 dark:lg:border-gray-700/70 lg:pl-7">
+            <div v-for="s in siteStats" :key="s.label" class="text-center lg:text-left">
+              <div class="text-xl sm:text-2xl font-extrabold theme-text leading-none">{{ s.value }}</div>
+              <div class="text-[11px] text-gray-400 mt-1">{{ s.label }}</div>
+            </div>
+          </div>
+
+          <!-- 右：热门标签快捷入口 -->
+          <div class="lg:border-l lg:border-gray-200/70 dark:lg:border-gray-700/70 lg:pl-7">
+            <div class="text-[11px] font-bold text-gray-400 mb-2 tracking-wide">热门标签</div>
+            <div class="flex flex-wrap gap-1.5">
+              <NuxtLink v-for="t in hotTags.slice(0, 6)" :key="t.id" :to="taxonomyPath('/tag', t)"
+                class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-white/70 dark:bg-gray-700/60 text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-600 hover:bg-primary-50 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
+                {{ t.name }}
+                <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
+              </NuxtLink>
+              <NuxtLink v-if="hotTags.length === 0" to="/tags" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">浏览全部标签 →</NuxtLink>
+            </div>
+            <NuxtLink to="/categories" class="inline-flex items-center gap-1 mt-2.5 text-xs text-primary-600 dark:text-primary-400 hover:underline">
+              全部分类 <span aria-hidden="true">→</span>
+            </NuxtLink>
           </div>
         </div>
       </div>
@@ -331,6 +361,7 @@ const categoryList = ref<any[]>([])
 const tags = ref<any[]>([])
 const hotArticles = ref<any[]>([])
 const totalPages = ref(0)
+const totalArticles = ref(0)
 const loading = ref(true)
 const mobileCatOpen = ref(false)
 
@@ -427,6 +458,13 @@ const hotTags = computed(() =>
   [...tags.value].sort((a: any, b: any) => (b.articleCount || 0) - (a.articleCount || 0)).slice(0, 8)
 )
 
+/** Hero 中间栏的站点概览：全部复用首屏 SSR 数据，不额外发请求 */
+const siteStats = computed(() => [
+  { label: '篇文章', value: totalArticles.value },
+  { label: '个分类', value: categoryList.value.length },
+  { label: '个标签', value: tags.value.length }
+])
+
 /** 拉取文章列表（只返回数据，便于首屏 SSR 序列化复用） */
 async function loadArticles(): Promise<{ records: any[]; pages: number }> {
   const params = new URLSearchParams({ pageNum: String(pageNum.value), pageSize: String(15) })
@@ -467,7 +505,9 @@ const { data: homeInit } = await useAsyncData('home-init', async () => {
     tags: tagRes?.code === 200 ? (tagRes.data || []) : [],
     hotArticles: [...hot].sort((a: any, b: any) => b.viewCount - a.viewCount).slice(0, 5),
     articles: art.records,
-    totalPages: art.pages
+    totalPages: art.pages,
+    // 文章总数给 Hero 的「站点概览」用；顺手复用已经发出的 hot 请求，不额外增加接口调用
+    totalArticles: hotRes?.code === 200 ? (hotRes.data?.total || 0) : 0
   }
 })
 
@@ -480,6 +520,7 @@ if (homeInit.value) {
   hotArticles.value = d.hotArticles
   articles.value = d.articles
   totalPages.value = d.totalPages
+  totalArticles.value = d.totalArticles || 0
 }
 loading.value = false
 

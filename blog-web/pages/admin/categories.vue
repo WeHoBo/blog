@@ -134,10 +134,13 @@ async function handleSave() {
   }
   saving.value = true
   try {
-    if (editing.value) {
-      await put(`/category/${editId.value}`, dialogForm)
-    } else {
-      await post('/category', dialogForm)
+    // 同样要判 body.code：后端业务失败是 HTTP 200 + code!=200，不判就会误报「保存成功」
+    const res = editing.value
+      ? await put<any>(`/category/${editId.value}`, dialogForm)
+      : await post<any>('/category', dialogForm)
+    if (res && res.code !== 200) {
+      toast('保存失败: ' + (res.message || '未知错误'), 'error')
+      return
     }
     dialogVisible.value = false
     toast('保存成功', 'success')
@@ -150,11 +153,18 @@ async function handleSave() {
 }
 
 async function handleDelete(id: number) {
-  const ok = await confirmDialog('确定删除该分类？其下文章将变为「未分类」，子分类不会被删除。')
+  const ok = await confirmDialog('确定删除该分类吗？其下【所有子分类会一并级联删除】，这些分类下的文章会变为「未建档文章」。此操作不可撤销。')
   if (!ok) return
   try {
-    await del(`/category/${id}`)
-    toast('删除成功', 'success')
+    // 注意：后端业务失败返回的是 HTTP 200 + body.code !== 200（useApi 只对 HTTP 错误抛异常），
+    // 所以这里必须自己判 code —— 否则「内置分类不可删除」会被误报成「删除成功」。
+    const res = await del<any>(`/category/${id}`)
+    if (res && res.code !== 200) {
+      toast(res.message || '删除失败', 'error')
+      return
+    }
+    const removed = typeof res?.data === 'number' ? res.data : 1
+    toast(removed > 1 ? `删除成功（含 ${removed - 1} 个子分类）` : '删除成功', 'success')
     fetchList()
   } catch (e: any) {
     toast('删除失败: ' + (e.message || '未知错误'), 'error')

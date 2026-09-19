@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.blog.common.constant.CategoryConstants;
 import com.blog.common.dto.ArticleDTO;
 import com.blog.common.entity.Article;
 import com.blog.common.entity.ArticleRevision;
@@ -189,7 +190,9 @@ public class ArticleService {
         article.setContentHtml(dto.getContentHtml());
         article.setSummary(dto.getSummary());
         article.setCover(dto.getCover());
-        article.setCategoryId(dto.getCategoryId());
+        // 没选分类也不算「没分类」：统一归到内置的「未建档文章」，避免出现裸的 null
+        Long categoryId = dto.getCategoryId() != null ? dto.getCategoryId() : defaultCategoryId();
+        article.setCategoryId(categoryId);
         article.setSeries(dto.getSeries());
         article.setIsTop(dto.getIsTop() != null ? dto.getIsTop() : 0);
         article.setWordCount(WordCounter.count(dto.getContentMd()));
@@ -205,7 +208,7 @@ public class ArticleService {
         }
 
         syncTags(article.getId(), dto.getTagIds());
-        adjustCategoryCount(dto.getCategoryId(), 1);
+        adjustCategoryCount(categoryId, 1);
         return article;
     }
 
@@ -236,7 +239,9 @@ public class ArticleService {
         article.setContentHtml(dto.getContentHtml());
         article.setSummary(dto.getSummary());
         article.setCover(dto.getCover());
-        article.setCategoryId(dto.getCategoryId());
+        // 同 create：清空分类也归入「未建档文章」，而不是留一个 null
+        Long nextCategoryId = dto.getCategoryId() != null ? dto.getCategoryId() : defaultCategoryId();
+        article.setCategoryId(nextCategoryId);
         article.setSeries(dto.getSeries());
         article.setWordCount(WordCounter.count(nextContent));
         if (dto.getIsTop() != null) {
@@ -267,9 +272,9 @@ public class ArticleService {
         }
 
         syncTags(id, dto.getTagIds());
-        if (!Objects.equals(oldCategoryId, dto.getCategoryId())) {
+        if (!Objects.equals(oldCategoryId, nextCategoryId)) {
             adjustCategoryCount(oldCategoryId, -1);
-            adjustCategoryCount(dto.getCategoryId(), 1);
+            adjustCategoryCount(nextCategoryId, 1);
         }
         evictArticleCache(id);
         return article;
@@ -373,14 +378,17 @@ public class ArticleService {
         article.setContentMd(revision.getContentMd());
         article.setSummary(revision.getSummary());
         article.setCover(revision.getCover());
-        article.setCategoryId(revision.getCategoryId());
+        // 版本快照里可能也是空分类（历史数据），同样兜底到「未建档文章」
+        Long restoredCategoryId = revision.getCategoryId() != null
+                ? revision.getCategoryId() : defaultCategoryId();
+        article.setCategoryId(restoredCategoryId);
         article.setSeries(revision.getSeries());
         article.setWordCount(WordCounter.count(revision.getContentMd()));
         articleMapper.updateById(article);
 
-        if (!Objects.equals(oldCategoryId, revision.getCategoryId())) {
+        if (!Objects.equals(oldCategoryId, restoredCategoryId)) {
             adjustCategoryCount(oldCategoryId, -1);
-            adjustCategoryCount(revision.getCategoryId(), 1);
+            adjustCategoryCount(restoredCategoryId, 1);
         }
         evictArticleCache(articleId);
         return article;
@@ -659,7 +667,9 @@ public class ArticleService {
         article.setSummary(meta.get("summary"));
         article.setCover(meta.get("cover"));
         article.setSeries(meta.get("series"));
-        article.setCategoryId(resolveCategoryByName(meta.get("category")));
+        // front-matter 里没写分类（或写了库中不存在的分类）→ 归入「未建档文章」
+        Long importedCategoryId = resolveCategoryByName(meta.get("category"));
+        article.setCategoryId(importedCategoryId != null ? importedCategoryId : defaultCategoryId());
         article.setSlug(resolveImportedSlug(meta.get("slug"), title));
         article.setUserId(userId);
         article.setStatus(0);
@@ -684,8 +694,11 @@ public class ArticleService {
             article.setUserId(userId);
             article.setStatus(0);
             article.setIsTop(0);
+            // Word 导入没有分类来源，同样归入「未建档文章」，别留 null
+            article.setCategoryId(defaultCategoryId());
             article.setWordCount(WordCounter.count(content));
             articleMapper.insert(article);
+            adjustCategoryCount(article.getCategoryId(), 1);
             return article;
         } catch (Exception e) {
             throw new BusinessException("Word 解析失败: " + e.getMessage());
@@ -769,6 +782,69 @@ public class ArticleService {
                 .map(Category::getId)
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * 取「未建档文章」分类的 id；不存在则自动创建。
+     *
+     * <p>为什么落到真实分类行、而不是只在展示层兜个名字：
+     * 分类页的文章数是按 {@code category_id} 聚合的，只有真正写进库，
+     * 「未建档文章」下面才能数得到文章，点进去也才能筛出东西。
+     *
+     * <p>并发安全：{@code category.slug} 上有唯一键，两个请求同时初始化时，
+     * 后插入的那个会撞唯一键，此时回查一次即可拿到已存在的那条。
+     */
+    @Transactional
+    public Long defaultCategoryId() {
+        Category existing = findDefaultCategory();
+        if (existing != null) {
+            return existing.getId();
+        }
+        Category category = new Category();
+        category.setName(CategoryConstants.DEFAULT_CATEGORY_NAME);
+        category.setSlug(CategoryConstants.DEFAULT_CATEGORY_SLUG);
+        category.setParentId(0L);
+        category.setSort(CategoryConstants.DEFAULT_CATEGORY_SORT);
+        category.setArticleCount(0);
+        try {
+            categoryMapper.insert(category);
+            return category.getId();
+        } catch (DuplicateKeyException e) {
+            Category created = findDefaultCategory();
+            if (created == null) {
+                throw e;
+            }
+            return created.getId();
+        }
+    }
+
+    /**
+     * 级联删除分类时调用：把被删子树下的文章改挂到「未建档文章」并同步计数。
+     * 直接改挂而不是置 NULL —— 分类页文章数按 category_id 聚合，置 NULL 要等下次启动才回填。
+     */
+    @Transactional
+    public void cascadeReassignToDefault(List<Long> categoryIds) {
+        if (categoryIds == null || categoryIds.isEmpty()) {
+            return;
+        }
+        Long defaultId = defaultCategoryId();
+        int moved = articleMapper.reassignCategories(categoryIds, defaultId);
+        if (moved > 0) {
+            adjustCategoryCount(defaultId, moved);
+        }
+    }
+
+    /** 先按固定 slug 找，再按名字找（兼容管理员手工建过同名分类的情况） */
+    private Category findDefaultCategory() {
+        Category bySlug = categoryMapper.selectOne(new LambdaQueryWrapper<Category>()
+                .eq(Category::getSlug, CategoryConstants.DEFAULT_CATEGORY_SLUG)
+                .last("LIMIT 1"));
+        if (bySlug != null) {
+            return bySlug;
+        }
+        return categoryMapper.selectOne(new LambdaQueryWrapper<Category>()
+                .eq(Category::getName, CategoryConstants.DEFAULT_CATEGORY_NAME)
+                .last("LIMIT 1"));
     }
 
     /**

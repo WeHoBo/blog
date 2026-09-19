@@ -20,9 +20,6 @@
         <NuxtLink to="/archive" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">归档</NuxtLink>
         <NuxtLink to="/categories" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">分类</NuxtLink>
         <NuxtLink to="/tags" class="px-3 py-1.5 rounded-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition">标签</NuxtLink>
-        <button @click="settingsOpen = true" class="px-2 py-1.5 rounded-full text-sm text-gray-500 hover:bg-primary-100/70 dark:hover:bg-primary-500/20 transition" title="主题设置">
-          <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a9 9 0 000 18h2.5a2 2 0 002-2.5A2 2 0 0118 15a2 2 0 012-1.5A2 2 0 0118.5 11H17a5 5 0 01-5-5V4.5A1.5 1.5 0 0012 2z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 15a2 2 0 104 0 2 2 0 00-4 0zM18 6a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-        </button>
       </nav>
 
       <!-- Search -->

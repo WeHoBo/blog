@@ -2,6 +2,7 @@ package com.blog.front.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.blog.common.constant.CategoryConstants;
 import com.blog.common.dto.ArticleDTO;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.Article;
@@ -137,7 +138,11 @@ public class ArticleController {
                 item.put("commentCount", a.getCommentCount());
                 item.put("isTop", a.getIsTop());
                 item.put("categoryId", a.getCategoryId());
-                item.put("categoryName", a.getCategoryId() != null ? categoryNameMap.get(a.getCategoryId()) : null);
+                // 历史数据可能没写 category_id（新数据在保存时已落到默认分类）：展示层统一兜底，
+                // 保证列表里永远显示得出分类名，不会出现空白
+                item.put("categoryName", a.getCategoryId() != null
+                        ? categoryNameMap.getOrDefault(a.getCategoryId(), CategoryConstants.DEFAULT_CATEGORY_NAME)
+                        : CategoryConstants.DEFAULT_CATEGORY_NAME);
                 item.put("createTime", a.getCreateTime());
                 item.put("wordCount", a.getWordCount() != null ? a.getWordCount() : 0);
                 if (a.getUserId() != null) {

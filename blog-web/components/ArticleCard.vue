@@ -41,7 +41,7 @@
             <span class="opacity-40">·</span>
             <span>{{ article.wordCount || 0 }} 字</span>
             <span class="opacity-40">·</span>
-            <span class="theme-text">{{ article.categoryName || '未分类' }}</span>
+            <span class="theme-text">{{ article.categoryName || '未建档文章' }}</span>
           </div>
 
           <p v-if="article.summary" class="text-gray-400 dark:text-gray-500 text-sm line-clamp-2 leading-relaxed mb-3">{{ article.summary }}</p>

@@ -10,33 +10,45 @@
     <!-- Main content -->
     <main class="flex-1 min-w-0">
       <article class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-        <!-- Meta header -->
-        <div class="px-6 sm:px-10 pt-8">
-          <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4 neon-glow">
-            {{ article.title }}
-          </h1>
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-400 mb-6 pb-6 border-b dark:border-gray-700">
-            <span>{{ article.createTime?.substring(0, 10) }}</span>
-            <span v-if="author" class="flex items-center gap-1">
-              <img v-if="author.avatar" :src="author.avatar" class="w-5 h-5 rounded-full object-cover" />
-              <span>{{ author.nickname || author.username }}</span>
-            </span>
-            <span>👁 {{ article.viewCount }} 阅读</span>
-            <ReadingTime :content="article.contentMd || ''" />
-            <span>📝 {{ wordCount }} 字</span>
-            <span>💬 {{ commentTotal || article.commentCount || 0 }} 评论</span>
-            <button v-if="authStore.isLoggedIn" @click="aiSummarize"
-              class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-primary-600 text-white hover:bg-primary-700 transition"
-              :disabled="aiSummaryLoading">
-              <svg v-if="aiSummaryLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
-              <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
-              {{ aiSummaryLoading ? '总结中...' : 'AI 总结' }}
-            </button>
+        <!--
+          头部版式：左侧「标题 + 元信息」，右侧「约方形封面缩略图」。
+          以前封面是正文上方的通栏大图（w-full max-h-96）：又长又扁，把标题和正文硬生生隔开，
+          和左侧密集的文字信息在视觉上也不协调。现在收成方形缩略图贴到标题右侧，左右两栏对齐。
+        -->
+        <div class="px-6 sm:px-10 pt-8 pb-6 border-b dark:border-gray-700">
+          <div class="flex items-start gap-4 sm:gap-6">
+            <!-- 左：标题 + 标题下方的全部元信息 -->
+            <div class="flex-1 min-w-0">
+              <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4 neon-glow">
+                {{ article.title }}
+              </h1>
+              <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-400">
+                <span>{{ article.createTime?.substring(0, 10) }}</span>
+                <span v-if="author" class="flex items-center gap-1">
+                  <img v-if="author.avatar" :src="author.avatar" class="w-5 h-5 rounded-full object-cover" />
+                  <span>{{ author.nickname || author.username }}</span>
+                </span>
+                <span>👁 {{ article.viewCount }} 阅读</span>
+                <span>📝 {{ wordCount }} 字</span>
+                <ReadingTime :content="article.contentMd || ''" />
+                <span>💬 {{ commentTotal || article.commentCount || 0 }} 评论</span>
+                <button v-if="authStore.isLoggedIn" @click="aiSummarize"
+                  class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-primary-600 text-white hover:bg-primary-700 transition"
+                  :disabled="aiSummaryLoading">
+                  <svg v-if="aiSummaryLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+                  <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
+                  {{ aiSummaryLoading ? '总结中...' : 'AI 总结' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 右：约方形封面缩略图（不再撑满整行，和左侧信息同高起步） -->
+            <div v-if="article.cover"
+              class="flex-shrink-0 w-20 h-20 sm:w-28 sm:h-28 lg:w-32 lg:h-32 rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-700 ring-1 ring-black/5 dark:ring-white/10 shadow-sm">
+              <img :src="article.cover" :alt="article.title" loading="lazy" class="w-full h-full object-cover" />
+            </div>
           </div>
         </div>
-
-        <!-- Cover -->
-        <img v-if="article.cover" :src="article.cover" :alt="article.title" loading="lazy" class="w-full max-h-96 object-cover" />
 
         <!-- Content -->
         <div class="px-6 sm:px-10 py-8">
