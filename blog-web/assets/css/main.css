@@ -84,6 +84,14 @@ strong, b { color: #1f2937; }
 .article-content hr { @apply my-8 border-gray-200 dark:border-gray-700; }
 .article-content pre.hljs { @apply rounded-xl my-4 p-5 text-sm leading-relaxed overflow-x-auto; }
 
+/* ---- LaTeX 数学公式（KaTeX） ----
+   颜色刻意不写死：KaTeX 自身不设 color，公式跟着正文继承，
+   浅色/夜间模式自动适配，不需要额外的 .dark 覆盖。 */
+/* 行间公式过宽时横向滚动，而不是把卡片撑破 */
+.article-content .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+/* 公式写错时 KaTeX（throwOnError:false）会把报错原文染红渲染出来，别让它被行内样式吃掉 */
+.article-content .katex-error { color: #cc0000; }
+
 /* Beautiful code blocks */
 .code-wrapper pre.hljs {
   background: #fefcf5 !important;

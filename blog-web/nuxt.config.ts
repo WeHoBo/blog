@@ -4,6 +4,11 @@ export default defineNuxtConfig({
 
   ssr: true,
 
+  // KaTeX 数学公式的样式必须全局引入（而不是写在组件里）：
+  // 公式在 SSR 阶段就已渲染成 HTML，样式若晚到，首屏会出现「先错乱、再抖正」的闪动。
+  // katex.min.css 里 @font-face 的字体路径会被 Vite 重写并随构建产物一起拷贝。
+  css: ['katex/dist/katex.min.css'],
+
   runtimeConfig: {
     public: {
       apiBase: '/api'

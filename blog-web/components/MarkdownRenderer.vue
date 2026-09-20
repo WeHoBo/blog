@@ -8,8 +8,28 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/common'
 import markdownItFootnote from 'markdown-it-footnote'
 import markdownItTaskLists from 'markdown-it-task-lists'
+// LaTeX 数学公式（$...$ 行内 / $$...$$ 行间）。markdown-it 核心不认数学语法，
+// 没有这个插件时 `$|f(x)|\le M$` 只会被当成普通文本原样输出。
+// 这里用静态 import 而非 mermaid 那样的运行时按需加载：公式需要参与 SSR
+// （服务端就要渲染成 HTML），动态 import 拿不到同步的渲染结果会让首屏闪一下纯文本。
+import * as markdownItKatexModule from '@vscode/markdown-it-katex'
 // 正文图片点击放大。手写实现放独立模块，避免这里继续膨胀（见 utils/imageLightbox.ts 顶部注释）
 import { bindImageLightbox } from '~/utils/imageLightbox'
+
+/**
+ * `@vscode/markdown-it-katex` 是**纯 CJS** 包（只有 main，没有 exports/module 字段），
+ * 而模块内部又写了 `exports.default` + `__esModule`，于是「默认导出」到底是函数还是
+ * 一层 `{ default: fn }` 包装，取决于由谁来加载：
+ *   - Vite 打包（客户端）：识别 __esModule，直接给到函数；
+ *   - Nitro SSR 把 node_modules 依赖外置、交给 Node 原生 ESM 加载：default 会变成包装对象。
+ * 两种形态都剥一层，避免服务端 `md.use()` 抛 "plugin.apply is not a function" 直接 500。
+ */
+const markdownItKatex: any = ((): any => {
+  const mod: any = markdownItKatexModule
+  if (typeof mod === 'function') return mod
+  if (typeof mod?.default === 'function') return mod.default
+  return mod?.default?.default
+})()
 
 const props = defineProps<{ content: string }>()
 
@@ -109,6 +129,9 @@ const md = new MarkdownIt({
 })
 .use(markdownItFootnote)
 .use(markdownItTaskLists)
+// throwOnError:false —— 公式写错时只在原位渲染一段红色错误提示（KaTeX 自带），
+// 绝不能让它抛异常：md.render() 一抛，整篇正文的 HTML 就全没了。
+.use(markdownItKatex, { throwOnError: false, errorColor: '#cc0000' })
 
 md.renderer.rules.heading_open = function (tokens: any, idx: number) {
   const token = tokens[idx]
