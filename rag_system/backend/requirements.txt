@@ -7,3 +7,9 @@ openai>=1.40.0
 python-dotenv>=1.0.0
 pymysql>=1.1.0
 requests>=2.31.0
+
+# ChromaDB 要求 sqlite3 >= 3.35.0。Alibaba Cloud Linux 3（EL8）等系统自带的
+# sqlite3 版本过低，需要用它替代标准库（见 main.py 顶部的 sys.modules 替换）。
+# 缺失时 main.py 会静默 ImportError->pass，随后 Chroma 报版本错，排错成本高，故显式声明。
+# 注意：Linux 上装的是预编译 wheel，需要 glibc；本项仅在 Linux 服务器生效。
+pysqlite3-binary>=0.5.4; sys_platform == "linux"

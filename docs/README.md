@@ -64,4 +64,9 @@
 
 - 部署指南：[deploy/README.md](../deploy/README.md)
 - 服务器加固与备份手册：[deploy/服务器加固与备份执行手册.md](../deploy/服务器加固与备份执行手册.md)
+  ⚠️ 该手册写于旧机 `8.130.49.86` 时期，服务器 IP 已过期，阅读时以新机 `47.116.138.65` 为准。
+- **换机收尾操作手册**：[deploy/换机收尾操作手册.md](../deploy/换机收尾操作手册.md)
+  （2026-09-20 换机后的四项收尾：清理迁移包 / 释放旧机前检查 / 凭据轮换 / RAG 依赖补齐）
+- 配套脚本：[deploy/migrate-cleanup.sh](../deploy/migrate-cleanup.sh)
+  （`check` 体检 · `clean` 清迁移包 · `rotate` 轮换辅助；幂等、不回显密钥）
 - RAG 子系统说明：[rag_system/README.md](../rag_system/README.md)
