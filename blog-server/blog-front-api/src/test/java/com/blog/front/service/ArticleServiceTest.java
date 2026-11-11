@@ -8,6 +8,7 @@ import com.blog.common.dto.ArticleDTO;
 import com.blog.common.entity.Article;
 import com.blog.common.entity.ArticleRevision;
 import com.blog.common.entity.ArticleTag;
+import com.blog.common.entity.Category;
 import com.blog.common.entity.Tag;
 import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.ArticleMapper;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -58,7 +60,8 @@ class ArticleServiceTest {
     @BeforeAll
     static void initTableInfo() {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
-        for (Class<?> entity : List.of(Article.class, ArticleRevision.class, ArticleTag.class, Tag.class)) {
+        for (Class<?> entity : List.of(Article.class, ArticleRevision.class, ArticleTag.class,
+                Tag.class, Category.class)) {
             TableInfoHelper.initTableInfo(assistant, entity);
         }
     }
@@ -122,6 +125,60 @@ class ArticleServiceTest {
         assertThrows(BusinessException.class, () -> s.getPublicById(1L));
     }
 
+    // ---------------- 阅读数：服务端渲染与浏览器打点 ----------------
+
+    @Test
+    void getPublicById_ssrRequest_doesNotCountView() {
+        mockCacheMiss();
+        Article published = article(1L, 1);
+        published.setViewCount(10);
+        when(articleMapper.selectById(1L)).thenReturn(published);
+        ArticleService s = service();
+
+        Article out = s.getPublicById(1L, false);
+
+        assertEquals(10, out.getViewCount(), "SSR 渲染不应把阅读数算进去");
+        verify(articleMapper, org.mockito.Mockito.never()).update(any(), any());
+    }
+
+    @Test
+    void getPublicById_browserRequest_countsView() {
+        mockCacheMiss();
+        // 真实 Redis 的 increment 返回自增后的值（从 1 开始），这里如实模拟
+        when(redisTemplate.opsForValue().increment(anyString())).thenReturn(1L);
+        Article published = article(1L, 1);
+        published.setViewCount(10);
+        when(articleMapper.selectById(1L)).thenReturn(published);
+        ArticleService s = service();
+
+        Article out = s.getPublicById(1L, true);
+
+        assertEquals(11, out.getViewCount(), "基准 10 + 本次增量 1");
+        verify(articleMapper).update(any(), any());
+    }
+
+    @Test
+    void incrementViewCount_returnsLatestCount() {
+        mockCacheMiss();
+        when(redisTemplate.opsForValue().increment(anyString())).thenReturn(1L);
+        Article published = article(2L, 1);
+        published.setViewCount(null);
+        when(articleMapper.selectById(2L)).thenReturn(published);
+        ArticleService s = service();
+
+        assertEquals(1, s.incrementViewCount(2L), "阅读数为空时应从 0 开始算");
+        verify(articleMapper).update(any(), any());
+    }
+
+    @Test
+    void incrementViewCount_draft_throws404() {
+        when(articleMapper.selectById(3L)).thenReturn(article(3L, 0));
+        ArticleService s = service();
+        BusinessException ex = assertThrows(BusinessException.class, () -> s.incrementViewCount(3L));
+        assertEquals(404, ex.getCode());
+        verify(articleMapper, org.mockito.Mockito.never()).update(any(), any());
+    }
+
     @Test
     void getAdminById_returnsDraft() {
         Article draft = article(1L, 0);
@@ -149,8 +206,7 @@ class ArticleServiceTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    void adminPage_selectsOnlyListColumns_excludesBodyAndPassword() {
-        ArticleService s = service();
+    void adminPage_selectsOnlyListColumns_excludesBodyAndPassword() {        ArticleService s = service();
         ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
         when(articleMapper.selectPage(any(), captor.capture())).thenReturn(new Page<>());
 
@@ -161,6 +217,65 @@ class ArticleServiceTest {
         assertFalse(select.contains("content_md"));
         assertFalse(select.contains("content_html"));
         assertFalse(select.contains("password"), "后台列表不应下发密码字段");
+    }
+
+    // ---------------- 关键词搜索范围 ----------------
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void page_keyword_matchesTitleSummaryTagAndCategory() {
+        // 标签名命中「Java」→ 关联文章 11、12
+        Tag javaTag = new Tag();
+        javaTag.setId(7L);
+        javaTag.setName("Java");
+        when(tagMapper.selectList(any())).thenReturn(List.of(javaTag));
+        ArticleTag link1 = new ArticleTag();
+        link1.setArticleId(11L);
+        link1.setTagId(7L);
+        ArticleTag link2 = new ArticleTag();
+        link2.setArticleId(12L);
+        link2.setTagId(7L);
+        when(articleTagMapper.selectList(any())).thenReturn(List.of(link1, link2));
+        // 分类名命中「Java」→ 分类 3
+        Category javaCategory = new Category();
+        javaCategory.setId(3L);
+        javaCategory.setName("Java");
+        when(categoryMapper.selectList(any())).thenReturn(List.of(javaCategory));
+
+        ArticleService s = service();
+        ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        when(articleMapper.selectPage(any(), captor.capture())).thenReturn(new Page<>());
+
+        s.page(1, 10, null, null, "Java", null, "time");
+
+        String sql = captor.getValue().getSqlSegment();
+        assertTrue(sql.contains("title"), "标题仍应参与匹配");
+        assertTrue(sql.contains("summary"), "摘要也应参与匹配（正文太长，不进 LIKE）");
+        assertTrue(sql.contains("category_id"), "分类名命中应并入查询");
+        assertTrue(sql.contains("OR id IN"), "标签名命中应并入查询");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void page_keyword_keepsStatusAndDeletedOutsideOrGroup() {
+        ArticleService s = service();
+        ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        when(articleMapper.selectPage(any(), captor.capture())).thenReturn(new Page<>());
+
+        s.page(1, 10, null, null, "Spring", null, "time");
+
+        // 标签 / 分类都没命中时，关键词只剩标题 + 摘要
+        String sql = captor.getValue().getSqlSegment();
+        assertFalse(sql.contains("category_id"), "没有分类命中时不应拼 category_id 条件");
+        assertTrue(sql.contains("summary"));
+
+        // 关键结构：status / is_deleted 必须在关键词分组之前。
+        // 若把 OR 平铺在外层，SQL 会变成 status=1 AND is_deleted=0 AND title LIKE ? OR ...，
+        // 草稿与已删除文章会直接漏进前台搜索结果。
+        int groupStart = sql.indexOf("AND (");
+        assertTrue(groupStart > 0, "关键词条件必须用 AND (...) 包成一组");
+        assertTrue(sql.indexOf("status") < groupStart, "status 必须留在关键词分组之外");
+        assertTrue(sql.indexOf("is_deleted") < groupStart, "is_deleted 必须留在关键词分组之外");
     }
 
     // ---------------- 空草稿 & 发布校验 ----------------

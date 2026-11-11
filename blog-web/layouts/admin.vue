@@ -2,7 +2,6 @@
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col relative">
     <div v-if="bgImage" class="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30 dark:opacity-20" :style="{ backgroundImage: `url(${bgImage})` }"></div>
     <StarryBackground v-else />
-    <FestivalEffect />
     <!-- Reading progress bar -->
     <div class="fixed top-0 left-0 z-50 h-0.5 bg-gradient-to-r from-primary-500 to-primary-500 transition-all" :style="{ width: progress + '%' }"></div>
     <header class="relative z-10 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-sm border-b dark:border-gray-700">
@@ -14,6 +13,7 @@
           <NuxtLink to="/admin/articles/trash" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">回收站</NuxtLink>
           <NuxtLink to="/admin/categories" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">分类</NuxtLink>
           <NuxtLink to="/admin/tags" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">标签</NuxtLink>
+          <NuxtLink to="/admin/comments" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">评论</NuxtLink>
           <NuxtLink to="/admin/links" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">友链</NuxtLink>
           <NuxtLink to="/admin/users" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">用户</NuxtLink>
           <NuxtLink to="/admin/logs" class="text-gray-600 dark:text-gray-300 hover:text-primary-600 transition shrink-0">日志</NuxtLink>

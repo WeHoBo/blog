@@ -49,6 +49,13 @@ public class ArticleService {
     private static final int MAX_REVISIONS = 30;
 
     /**
+     * 关键词命中标签/分类时最多回填的 id 数量。
+     * 不加限制的话，命中的标签一旦挂着上千篇文章，就会拼出一条几千项的 IN 列表，
+     * MySQL 解析成本随项数线性上升，还会撑爆 SQL 长度上限。
+     */
+    private static final int SEARCH_RELATION_ID_LIMIT = 500;
+
+    /**
      * 自动保存模式下的快照节流间隔。
      * 编辑器每 30 秒自动存一次，若每次都留快照，30 个版本只能覆盖十几分钟的写作过程；
      * 因此自动保存最多每 10 分钟留一版，而用户主动「保存 / 发布」时**必定**留一版。
@@ -79,7 +86,7 @@ public class ArticleService {
             wrapper.eq(Article::getCategoryId, categoryId);
         }
         if (StrUtil.isNotBlank(keyword)) {
-            wrapper.like(Article::getTitle, keyword);
+            applyKeywordSearch(wrapper, keyword.trim());
         }
         if (tagId != null) {
             List<ArticleTag> ats = articleTagMapper.selectList(
@@ -109,6 +116,72 @@ public class ArticleService {
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 
+    /**
+     * 关键词搜索：标题 + 摘要 + 标签名 + 分类名。
+     *
+     * <p>后两类命中没法直接在 article 表上 LIKE —— 标签在 article_tag 关联表、分类在 category 表，
+     * 所以先查出命中的 id 集合，再以 {@code OR id IN (...)} / {@code OR category_id IN (...)} 并入。
+     *
+     * <p>整组必须用 {@code and(...)} 包起来：外层已经有 {@code status=1}、{@code is_deleted=0} 条件，
+     * 如果直接在外层 {@code or()}，就会变成
+     * {@code status=1 AND is_deleted=0 AND title LIKE ? OR ...}，
+     * 后半个 OR 会把前两个条件短路掉 —— 草稿和已删除文章都会漏到前台搜索结果里。
+     */
+    private void applyKeywordSearch(LambdaQueryWrapper<Article> wrapper, String keyword) {
+        List<Long> tagArticleIds = articleIdsByTagKeyword(keyword);
+        List<Long> categoryIds = categoryIdsByKeyword(keyword);
+        wrapper.and(w -> {
+            w.like(Article::getTitle, keyword)
+                    .or().like(Article::getSummary, keyword);
+            if (!categoryIds.isEmpty()) {
+                w.or().in(Article::getCategoryId, categoryIds);
+            }
+            if (!tagArticleIds.isEmpty()) {
+                w.or().in(Article::getId, tagArticleIds);
+            }
+        });
+    }
+
+    /** 标签名命中 → 这些标签下的文章 id（去重并限长） */
+    private List<Long> articleIdsByTagKeyword(String keyword) {
+        List<Tag> tags = tagMapper.selectList(
+                new LambdaQueryWrapper<Tag>().like(Tag::getName, keyword));
+        if (tags == null || tags.isEmpty()) {
+            return List.of();
+        }
+        List<Long> tagIds = tags.stream().map(Tag::getId).filter(Objects::nonNull)
+                .distinct().limit(SEARCH_RELATION_ID_LIMIT).toList();
+        if (tagIds.isEmpty()) {
+            return List.of();
+        }
+        List<ArticleTag> links = articleTagMapper.selectList(
+                new LambdaQueryWrapper<ArticleTag>().in(ArticleTag::getTagId, tagIds));
+        if (links == null || links.isEmpty()) {
+            return List.of();
+        }
+        return links.stream()
+                .map(ArticleTag::getArticleId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(SEARCH_RELATION_ID_LIMIT)
+                .toList();
+    }
+
+    /** 分类名命中 → 这些分类的 id（去重并限长） */
+    private List<Long> categoryIdsByKeyword(String keyword) {
+        List<Category> categories = categoryMapper.selectList(
+                new LambdaQueryWrapper<Category>().like(Category::getName, keyword));
+        if (categories == null || categories.isEmpty()) {
+            return List.of();
+        }
+        return categories.stream()
+                .map(Category::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(SEARCH_RELATION_ID_LIMIT)
+                .toList();
+    }
+
     public Page<Article> adminPage(int pageNum, int pageSize, String keyword, Integer status, Long categoryId) {
         LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<Article>()
                 .eq(Article::getIsDeleted, 0);
@@ -134,8 +207,33 @@ public class ArticleService {
     }
 
     public Article getPublicById(Long id) {
+        return getPublicById(id, true);
+    }
+
+    /**
+     * 取前台文章详情。
+     *
+     * @param countView 是否计入阅读数。
+     *                  <p>页面 HTML 上了 routeRules 缓存之后，同一个 URL 在缓存窗口内只会渲染一次，
+     *                  如果还按「每次 GET 都 +1」，缓存命中期间的阅读就全丢了。
+     *                  所以服务端渲染那条路径传 false（只读展示值），改由浏览器挂载后调
+     *                  {@code POST /api/article/{id}/view} 单独打点 —— 这样缓存命中/未命中都是一次访问记一次。
+     *                  App 等直接调接口的客户端不认这个约定，仍走 true，行为与之前一致。
+     */
+    public Article getPublicById(Long id, boolean countView) {
+        Article article = loadPublicArticle(id);
+        if (countView) {
+            applyViewCount(id, article);
+        } else {
+            // 只读：把「缓存里的基准值 + 窗口内增量」算出来展示，不写库也不自增
+            article.setViewCount(currentViewCount(id, article.getViewCount()));
+        }
+        return article;
+    }
+
+    /** 缓存优先地取一篇公开文章（不含阅读数逻辑） */
+    private Article loadPublicArticle(Long id) {
         String key = ArticleCacheKeys.article(id);
-        // 本次缓存窗口内的浏览量增量（与文章缓存同 TTL，过期即重置）
         String viewKey = ArticleCacheKeys.viewCount(id);
         Article article = (Article) redisTemplate.opsForValue().get(key);
         if (article == null) {
@@ -149,6 +247,12 @@ public class ArticleService {
             redisTemplate.delete(key);
             throw new BusinessException(404, "文章不存在");
         }
+        return article;
+    }
+
+    /** 阅读数 +1：数据库原子自增 + Redis 窗口计数器，并把最新值写回传入的 article */
+    private void applyViewCount(Long id, Article article) {
+        String viewKey = ArticleCacheKeys.viewCount(id);
         // 持久化：单条主键 UPDATE 原子自增（数据库始终是浏览量的真实来源）
         articleMapper.update(null, new LambdaUpdateWrapper<Article>()
                 .eq(Article::getId, id)
@@ -156,9 +260,35 @@ public class ArticleService {
         // 展示：用 Redis 计数器自增，免去每次访问都回查一次数据库
         // 展示值 = 缓存加载时的 DB 基准值 + 窗口内增量，与数据库保持同步
         Long delta = redisTemplate.opsForValue().increment(viewKey);
-        article.setViewCount((article.getViewCount() == null ? 0 : article.getViewCount())
-                + (delta == null ? 1 : delta.intValue()));
-        return article;
+        int base = article.getViewCount() == null ? 0 : article.getViewCount();
+        article.setViewCount(base + (delta == null ? 1 : delta.intValue()));
+    }
+
+    /** 只读地算出当前展示值（基准值 + Redis 窗口增量），不写库、不自增 */
+    private int currentViewCount(Long id, Integer base) {
+        int value = base == null ? 0 : base;
+        try {
+            Object delta = redisTemplate.opsForValue().get(ArticleCacheKeys.viewCount(id));
+            if (delta instanceof Number n) {
+                return value + n.intValue();
+            }
+        } catch (Exception ignored) {
+            // Redis 故障时退回基准值，不影响详情可用性
+        }
+        return value;
+    }
+
+    /**
+     * 阅读数打点（浏览器侧调用）。
+     * 返回最新阅读数，前端可以就地刷新数字而不用整页重载。
+     */
+    public int incrementViewCount(Long id) {
+        Article article = articleMapper.selectById(id);
+        if (article == null || !isPublicArticle(article)) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        applyViewCount(id, article);
+        return article.getViewCount() == null ? 0 : article.getViewCount();
     }
 
     public Article getAdminById(Long id) {

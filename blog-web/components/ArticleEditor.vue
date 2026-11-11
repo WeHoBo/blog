@@ -71,7 +71,7 @@
             {{ coverUploading ? '上传中...' : '上传' }}
           </label>
         </div>
-        <img v-if="form.cover" :src="form.cover" alt="封面预览" class="mt-2 h-32 rounded-lg object-cover" />
+        <img v-if="form.cover" :src="ossImage(form.cover, { w: IMG_W.card })" alt="封面预览" class="mt-2 h-32 rounded-lg object-cover" />
       </div>
 
       <div>
@@ -106,8 +106,23 @@
             📷 插图
           </label>
           <button type="button" @click="mediaOpen = true" class="px-3 py-1 border rounded text-xs hover:border-primary-500 hover:text-primary-500">🖼 素材库</button>
+          <!-- 导入 PDF：前端解析，文字按行重组、内嵌图片走上传接口进 OSS，结果插到光标处 -->
+          <label class="px-3 py-1 border rounded text-xs cursor-pointer hover:border-primary-500 hover:text-primary-500" title="选择一个 PDF，自动转成 Markdown 正文">
+            <input type="file" accept="application/pdf,.pdf" class="hidden" :disabled="pdfImporting" @change="importPdf" />
+            📄 导入 PDF
+          </label>
           <button type="button" @click="tool.codeBlock" class="px-3 py-1 border rounded text-xs hover:border-primary-500 hover:text-primary-500">&lt;/&gt; 代码块</button>
           <button type="button" @click="tool.link" class="px-3 py-1 border rounded text-xs hover:border-primary-500 hover:text-primary-500">🔗 链接</button>
+        </div>
+
+        <!-- PDF 导入进度（解析和上传是两段，用文字说清楚卡在哪一步） -->
+        <div v-if="pdfImporting" class="mb-2">
+          <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
+            <span>正在导入 PDF：{{ pdfStatus }}</span>
+          </div>
+          <div class="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div class="h-full bg-primary-500 transition-all" :style="{ width: pdfPercent + '%' }"></div>
+          </div>
         </div>
 
         <!-- 上传进度条 -->
@@ -153,6 +168,7 @@
 
 <script setup lang="ts">
 import { EditorView, basicSetup } from 'codemirror'
+import { ossImage, IMG_W } from '~/utils/image'
 import { markdown } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { EditorState } from '@codemirror/state'
@@ -503,6 +519,88 @@ async function insertImageFile(file: File) {
     }
   } finally {
     uploading.value = false
+  }
+}
+
+/* ---------------------------------------------------------------
+   导入 PDF
+   --------------------------------------------------------------- */
+const pdfImporting = ref(false)
+const pdfPercent = ref(0)
+const pdfStatus = ref('')
+
+/**
+ * 选一个 PDF → 前端解析成 Markdown → 插到光标处。
+ *
+ * 几个刻意的取舍：
+ * - **不在后端做**：后端解析要改 Java、重打 jar、再部署一轮，而且 PDF 原文（可能有版权内容）
+ *   就不必上传了；只有提取出来的图片会进 OSS。
+ * - **`utils/pdfImport` 用动态 import**：pdfjs-dist 带 worker，体积不小，不该进编辑器首屏包；
+ *   只有真的点了「导入 PDF」才下载。
+ * - **解析期间允许继续编辑**：插入是最后一次性完成的，不会边解析边改你的文档。
+ */
+async function importPdf(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 清空，否则连续导入同一个文件不会再触发 change
+  if (!file) return
+
+  if (file.size > 40 * 1024 * 1024) {
+    toast('PDF 超过 40MB，建议先拆分再导入', 'error')
+    return
+  }
+
+  pdfImporting.value = true
+  pdfPercent.value = 0
+  pdfStatus.value = '读取文件…'
+  try {
+    const { pdfToMarkdown } = await import('~/utils/pdfImport')
+    const result = await pdfToMarkdown(file, {
+      onProgress: (p) => {
+        if (p.stage === 'upload') {
+          // 上传阶段拿不到总数，按次微增，避免进度条卡住不动
+          pdfPercent.value = Math.min(95, pdfPercent.value + 4)
+        } else if (p.totalPages) {
+          pdfPercent.value = Math.round(5 + ((p.page - 1) / p.totalPages) * 55)
+        }
+        pdfStatus.value = p.totalPages
+          ? `第 ${p.page}/${p.totalPages} 页${p.detail ? ' · ' + p.detail : ''}`
+          : (p.detail || '解析中…')
+      },
+      uploadImage: async (blob, name) => {
+        // 走和「插图」完全相同的上传链路：先压成 WebP 再传，省 OSS 流量
+        const raw = new File([blob], name, { type: blob.type || 'image/png' })
+        const compressed = await compressImage(raw)
+        const url = await uploadWithProgress(compressed)
+        // 上传接口失败时可能 HTTP 200 + code≠200，甚至 data 是 [] / null。
+        // 不校验的话会拼出 `![]()` 这种空地址破图，作者还看不出是哪一步坏的。
+        if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
+          throw new Error('图片上传未返回地址')
+        }
+        return url
+      }
+    })
+
+    if (!result.markdown.trim()) {
+      toast('这个 PDF 没提取到任何内容', 'error')
+      return
+    }
+
+    const { from } = getSelection()
+    // 光标不在文首时补两个空行，避免和上一段粘在一起
+    replaceRange(from, from, (from > 0 ? '\n\n' : '') + result.markdown + '\n')
+
+    const bits = [`${result.pages} 页`, `${result.chars} 字`]
+    if (result.images) bits.push(`${result.images} 张图`)
+    toast(`导入完成：${bits.join(' / ')}，请检查标题与段落`, 'success')
+    // 警告逐条提示（扫描件、上传失败、图片超上限等）
+    for (const w of result.warnings) toast(w, 'error', 6000)
+  } catch (e: any) {
+    toast('导入 PDF 失败：' + (e?.message || '未知错误'), 'error')
+  } finally {
+    pdfImporting.value = false
+    pdfPercent.value = 0
+    pdfStatus.value = ''
   }
 }
 

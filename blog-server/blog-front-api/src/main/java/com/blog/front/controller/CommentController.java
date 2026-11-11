@@ -3,16 +3,21 @@ package com.blog.front.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.blog.common.constant.CommentReportReasons;
+import com.blog.common.dto.CommentReportForm;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.Article;
 import com.blog.common.entity.Comment;
+import com.blog.common.entity.CommentReport;
 import com.blog.common.entity.User;
 import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.CommentMapper;
+import com.blog.common.mapper.CommentReportMapper;
 import com.blog.common.mapper.UserMapper;
 import com.blog.common.vo.CommentVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -35,6 +40,7 @@ public class CommentController {
     private static final long COMMENT_INTERVAL_SECONDS = 10;
 
     private final CommentMapper commentMapper;
+    private final CommentReportMapper commentReportMapper;
     private final ArticleMapper articleMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate stringRedisTemplate;
@@ -118,5 +124,44 @@ public class CommentController {
                 .eq(Article::getId, comment.getArticleId()));
 
         return Result.ok(entity);
+    }
+
+    /**
+     * 举报评论。
+     *
+     * <p>只记录「谁、哪条、什么原因」，不复制正文；真正删不删由管理员在后台决定。
+     * 同一个人对同一条评论只能举报一次（唯一键 uk_comment_user 兜住并发）。</p>
+     */
+    @PostMapping("/report")
+    public Result<?> report(@RequestBody CommentReportForm form) {
+        if (form == null || form.getCommentId() == null) {
+            throw new BusinessException("参数不完整");
+        }
+        String reason = form.getReason() == null ? "" : form.getReason().trim();
+        if (!CommentReportReasons.ALL.contains(reason)) {
+            throw new BusinessException("举报原因不合法");
+        }
+        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+
+        Comment comment = commentMapper.selectById(form.getCommentId());
+        if (comment == null || comment.getStatus() == null || comment.getStatus() != 1) {
+            throw new BusinessException("评论不存在或已删除");
+        }
+        if (userId.equals(comment.getUserId())) {
+            throw new BusinessException("不能举报自己的评论");
+        }
+
+        CommentReport report = new CommentReport();
+        report.setCommentId(form.getCommentId());
+        report.setUserId(userId);
+        report.setReason(reason);
+        report.setStatus(0);
+        try {
+            commentReportMapper.insert(report);
+        } catch (DuplicateKeyException e) {
+            // 唯一键冲突：已举报过。给一句人话，不要把 SQL 异常抛给前端
+            throw new BusinessException("你已经举报过这条评论，我们会尽快处理");
+        }
+        return Result.ok();
     }
 }

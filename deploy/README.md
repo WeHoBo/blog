@@ -170,6 +170,39 @@ sudo systemctl restart nginx
 > `root` / 静态目录引用，请求全部走反代 → 前端改动不会生效（这是旧脚本的历史坑）。
 > `deploy/deploy.sh` 已按正确方式重写（含 `blog-web` 的部署与重启）。
 
+#### ⚠️ 打包上传前必须检查：`.output` 里不能有符号链接
+
+**2026-11-07 生产 500 事故**：本地构建 + `tar` 上传后，`systemctl status blog-web` 显示 **active**，
+但访问首页返回 **500**，日志里是：
+
+```
+H3Error: Cannot find module 'entities/decode'
+Require stack:
+- /opt/blog/web/.output/server/node_modules/@vue/compiler-core/dist/compiler-core.cjs.prod.js
+```
+
+**根因**：Nitro 为了支持同一个包多版本共存，会把实体放在
+`.output/server/node_modules/.nitro/<包>@<版本>/`，然后在 `node_modules/<包>` 建**符号链接**，
+而且写的是**构建机上的绝对路径**（如 `/d/cxdownload/Blog/blog-web/.output/...`）。
+在构建机上链接有效（本地怎么测都 200），传到 Linux 后路径不存在 → 链接全断 → SSR 崩溃。
+
+**处理**：`blog-web/package.json` 的 `build` 脚本已挂上
+`node scripts/fix-output-symlinks.mjs`，构建完自动把所有链接替换成真实拷贝。
+⚠️ 如果用 `node node_modules/nuxt/bin/nuxt.mjs build` 这种**绕过 npm script** 的方式构建，
+必须手动补跑一次 `node scripts/fix-output-symlinks.mjs`。
+
+**打包前后各验一次（5 秒）**：
+
+```bash
+# 构建后：产物里不该有任何符号链接，输出应为 0
+find blog-web/.output -type l | wc -l
+
+# 打包后：包里不该有 `l` 类型条目，输出应为空
+tar -tvzf blog-web/output.tar.gz | grep '^l'
+```
+
+第二条只要有输出，**别上传**——上去一定 500。
+
 ### 9. 配置 OAuth 回调地址
 
 到你申请的 GitHub/Gitee OAuth App 里，把回调地址从 `localhost:8080` 改成：

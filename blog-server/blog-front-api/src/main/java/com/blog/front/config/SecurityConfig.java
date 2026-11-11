@@ -28,7 +28,13 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // 管理端评论接口必须先于下面的 GET /api/comment/** permitAll 匹配，
+                // 否则 admin 的 GET 会被放行（方法级 @PreAuthorize 虽然还在，但别依赖两层兜底）
+                .requestMatchers("/api/comment/admin/**").hasRole("admin")
                 .requestMatchers(HttpMethod.GET, "/api/article/**").permitAll()
+                // 阅读数打点：页面 HTML 被 routeRules 缓存后，服务端渲染不再每次都打详情接口，
+                // 改由浏览器在挂载后自己上报一次。它必须匿名可调，否则缓存命中页的阅读数就不涨了。
+                .requestMatchers(HttpMethod.POST, "/api/article/*/view").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/category/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/tag/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/comment/**").permitAll()

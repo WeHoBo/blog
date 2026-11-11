@@ -52,3 +52,12 @@ rag-deploy.tar.gz
 tree.txt
 test-out.txt
 *.dump
+
+# 鸿蒙 App 的 Markdown 渲染器打包脚本（依赖 blog-web/node_modules 的临时工具，
+# 产物已落在 HarmonyOS 工程 rawfile/markdown/renderer.js，脚本本身不入库）
+blog-web/.renderer-entry.js
+blog-web/.build-renderer.mjs
+blog-web/web-output.tar.gz
+# 前端构建产物的临时打包（8MB+，只用于 scp 上传，不入库）
+blog-web/web.tar.gz
+blog-web/web-*.tar.gz

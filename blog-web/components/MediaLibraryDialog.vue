@@ -36,7 +36,7 @@
             :title="f.originalName"
             @click="pick(f)"
           >
-            <img :src="f.url" :alt="f.originalName || '图片'" class="w-full h-full object-cover" loading="lazy" />
+            <img :src="ossImage(f.url, { w: IMG_W.thumb })" :alt="f.originalName || '图片'" class="w-full h-full object-cover" loading="lazy" decoding="async" />
             <span class="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[11px] px-1 py-0.5 truncate opacity-0 group-hover:opacity-100 transition">
               {{ f.ext }} · {{ formatSize(f.fileSize) }}
             </span>
@@ -54,6 +54,8 @@
 </template>
 
 <script setup lang="ts">
+import { ossImage, IMG_W } from '~/utils/image'
+
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'pick', url: string): void }>()
 

@@ -165,17 +165,29 @@ public class ArticleController {
         return Result.ok(result);
     }
 
+    /**
+     * 服务端渲染标记。前端 SSR 期间请求详情接口时会带这个头，表示「这只是一次渲染，别记阅读数」——
+     * 页面 HTML 上了 routeRules 缓存后，同一 URL 在缓存窗口内只渲染一次，按 GET 计数会漏记。
+     * 浏览器挂载后会调 {@code POST /api/article/{id}/view} 补记，一次访问记一次。
+     */
+    private static final String CLIENT_SSR = "ssr";
+
     @GetMapping("/post/{slug}")
-    public Result<Map<String, Object>> bySlug(@PathVariable String slug) {
+    public Result<Map<String, Object>> bySlug(@PathVariable String slug,
+                                              @RequestHeader(value = "X-Blog-Client", required = false) String client) {
         Article article = articleMapper.selectOne(
                 new LambdaQueryWrapper<Article>().eq(Article::getSlug, slug));
         if (article == null) return Result.fail(404, "文章不存在");
-        return detail(article.getId());
+        return detail(article.getId(), client);
     }
 
     @GetMapping("/{id:\\d+}")
-    public Result<Map<String, Object>> detail(@PathVariable Long id) {
-        Article article = isAdmin() ? articleService.getAdminById(id) : articleService.getPublicById(id);
+    public Result<Map<String, Object>> detail(@PathVariable Long id,
+                                              @RequestHeader(value = "X-Blog-Client", required = false) String client) {
+        boolean countView = !CLIENT_SSR.equalsIgnoreCase(client == null ? "" : client.trim());
+        Article article = isAdmin()
+                ? articleService.getAdminById(id)
+                : articleService.getPublicById(id, countView);
         List<Tag> tags = articleService.getTagsByArticleId(id);
         Map<String, Object> result = new HashMap<>();
         result.put("article", article);
@@ -192,6 +204,15 @@ public class ArticleController {
             }
         }
         return Result.ok(result);
+    }
+
+    /**
+     * 阅读数打点。浏览器挂载后调一次：缓存命中的页面没有 SSR 请求，靠它把这次访问记上。
+     * 返回最新阅读数，前端可就地刷新数字。
+     */
+    @PostMapping("/{id:\\d+}/view")
+    public Result<Integer> view(@PathVariable Long id) {
+        return Result.ok(articleService.incrementViewCount(id));
     }
 
     @GetMapping("/categories")

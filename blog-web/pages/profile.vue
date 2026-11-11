@@ -7,7 +7,7 @@
       <div>
         <label class="text-sm text-gray-500 mb-2 block">头像</label>
         <div class="flex items-center gap-4">
-          <img v-if="form.avatar" :src="form.avatar" class="w-20 h-20 rounded-full object-cover border-2 border-gray-200" />
+          <img v-if="form.avatar" :src="ossImage(form.avatar, { w: IMG_W.thumb })" class="w-20 h-20 rounded-full object-cover border-2 border-gray-200" />
           <div v-else class="w-20 h-20 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold text-2xl">{{ authStore.user?.nickname?.[0] || '?' }}</div>
           <div class="flex flex-col gap-2">
             <label class="px-4 py-2 border-2 border-dashed rounded-lg text-sm cursor-pointer hover:border-primary-500 hover:text-primary-500 transition text-center">
@@ -40,6 +40,8 @@
 
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
+import { ossImage, IMG_W } from '~/utils/image'
+
 const authStore = useAuthStore()
 const { put } = useApi()
 const { upload } = useUpload()

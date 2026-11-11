@@ -3,33 +3,17 @@
 </template>
 
 <script setup lang="ts">
-import MarkdownIt from 'markdown-it'
-// 仅引入常用语言子集（~300KB），体积远小于完整包；文章页必需，SSR 同样可用
-import hljs from 'highlight.js/lib/common'
-import markdownItFootnote from 'markdown-it-footnote'
-import markdownItTaskLists from 'markdown-it-task-lists'
-// LaTeX 数学公式（$...$ 行内 / $$...$$ 行间）。markdown-it 核心不认数学语法，
-// 没有这个插件时 `$|f(x)|\le M$` 只会被当成普通文本原样输出。
-// 这里用静态 import 而非 mermaid 那样的运行时按需加载：公式需要参与 SSR
-// （服务端就要渲染成 HTML），动态 import 拿不到同步的渲染结果会让首屏闪一下纯文本。
-import * as markdownItKatexModule from '@vscode/markdown-it-katex'
+/**
+ * 正文渲染组件。
+ *
+ * 只负责两件事：拿到 HTML（交给 utils/markdownCore 统一渲染，目录用的是同一套规则），
+ * 以及渲染后对 DOM 做增强（mermaid、代码工具条、图片灯箱）。
+ * 之前这里还塞着整个 markdown-it 配置与标题 id 生成逻辑，导致目录只能另写一份正则去猜标题，
+ * 已经因此出过「代码块注释被当成标题」「同名小节跳错位置」的问题，现已全部收敛到 markdownCore。
+ */
+import { renderMarkdown, CODE_FOLD_THRESHOLD } from '~/utils/markdownCore'
 // 正文图片点击放大。手写实现放独立模块，避免这里继续膨胀（见 utils/imageLightbox.ts 顶部注释）
 import { bindImageLightbox } from '~/utils/imageLightbox'
-
-/**
- * `@vscode/markdown-it-katex` 是**纯 CJS** 包（只有 main，没有 exports/module 字段），
- * 而模块内部又写了 `exports.default` + `__esModule`，于是「默认导出」到底是函数还是
- * 一层 `{ default: fn }` 包装，取决于由谁来加载：
- *   - Vite 打包（客户端）：识别 __esModule，直接给到函数；
- *   - Nitro SSR 把 node_modules 依赖外置、交给 Node 原生 ESM 加载：default 会变成包装对象。
- * 两种形态都剥一层，避免服务端 `md.use()` 抛 "plugin.apply is not a function" 直接 500。
- */
-const markdownItKatex: any = ((): any => {
-  const mod: any = markdownItKatexModule
-  if (typeof mod === 'function') return mod
-  if (typeof mod?.default === 'function') return mod.default
-  return mod?.default?.default
-})()
 
 const props = defineProps<{ content: string }>()
 
@@ -45,106 +29,7 @@ async function ensureMermaid() {
   }
 }
 
-/** 超过这个行数的代码块默认折叠，右上角给「展开」按钮 */
-const CODE_FOLD_THRESHOLD = 30
-
-/**
- * 解析围栏代码块「语言名」之外的元信息。
- *
- * markdown-it 的 highlight(str, langName, langAttrs) 第 3 个参数就是 info 串里
- * 除语言名以外的剩余部分，常见写法：
- *   ```js title="server.js" {3-5,8}
- * 这里把它拆成「文件名」与「要高亮的行号集合」。
- */
-function parseFenceMeta(attrs?: string) {
-  const raw = attrs || ''
-  const titleMatch = raw.match(/title\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/)
-  const title = titleMatch ? (titleMatch[1] ?? titleMatch[2] ?? titleMatch[3] ?? '') : ''
-
-  const highlightLines = new Set<number>()
-  const rangeMatch = raw.match(/\{([^}]*)\}/)
-  if (rangeMatch) {
-    for (const part of rangeMatch[1].split(',')) {
-      const p = part.trim()
-      if (!p) continue
-      const range = p.match(/^(\d+)\s*-\s*(\d+)$/)
-      if (range) {
-        const a = Number(range[1])
-        const b = Number(range[2])
-        const from = Math.min(a, b)
-        const to = Math.max(a, b)
-        // 上限保护：写成 {1-999999} 也不至于把行号集合撑爆
-        for (let i = from; i <= to && i - from < 5000; i++) highlightLines.add(i)
-      } else if (/^\d+$/.test(p)) {
-        highlightLines.add(Number(p))
-      }
-    }
-  }
-  return { title, highlightLines }
-}
-
-const md = new MarkdownIt({
-  // html: false —— 禁用正文中的裸 HTML，避免配合 v-html 造成存储型 XSS。
-  // 代码块高亮、mermaid 等由下方 renderer 规则生成 HTML，不受此开关影响。
-  html: false, linkify: true, typographer: true, breaks: true,
-  highlight(str: string, lang: string, attrs?: string) {
-    if (lang === 'mermaid') {
-      return '<div class="mermaid-wrapper"><div class="mermaid">' + md.utils.escapeHtml(str) + '</div></div>'
-    }
-    const { title, highlightLines } = parseFenceMeta(attrs)
-    // markdown-it 传入的代码块内容末尾自带一个 \n；highlight.js 的结果末尾也会补一个 \n。
-    // 不剥离的话，代码块底部会多渲染一个空行，复制出来的代码末尾也会多出换行。
-    const content = str.replace(/\n$/, '')
-    const rawLines = content.split('\n')
-
-    let highlighted: string | null = null
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        const value = hljs.highlight(content, { language: lang, ignoreIllegals: true }).value.replace(/\n$/, '')
-        // 行高亮要按行包 <span>，若着色结果行数与原文不一致（理论上不该发生），
-        // 宁可退回纯文本，也不要错位标错行。
-        if (value.split('\n').length === rawLines.length) highlighted = value
-      } catch {}
-    }
-
-    // 空行不再塞 `&nbsp;` 占位：`.line` 的 min-height 已能撑出行高，
-    // 保留占位符会让复制出来的空行里混入不换行空格（U+00A0）。
-    const sourceLines = highlighted ? highlighted.split('\n') : rawLines.map((l) => md.utils.escapeHtml(l))
-    const lines = sourceLines
-      .map((l, i) => {
-        const marked = highlightLines.has(i + 1) ? ' line-highlight' : ''
-        return `<span class="line${marked}"><span class="line-no"></span>${l}</span>`
-      })
-      .join('')
-
-    // 有 title 时展示文件名（读者更关心"这是哪个文件"），否则退回语言名
-    const labelText = title || lang || ''
-    const label = labelText
-      ? `<span class="code-lang-label${title ? ' is-file' : ''}">${md.utils.escapeHtml(labelText)}</span>`
-      : ''
-    const collapsed = rawLines.length > CODE_FOLD_THRESHOLD ? ' code-collapsed' : ''
-    return `<div class="code-wrapper${collapsed}" data-lines="${rawLines.length}">`
-      + label + '<pre class="hljs"><code>' + lines + '</code></pre></div>'
-  }
-})
-.use(markdownItFootnote)
-.use(markdownItTaskLists)
-// throwOnError:false —— 公式写错时只在原位渲染一段红色错误提示（KaTeX 自带），
-// 绝不能让它抛异常：md.render() 一抛，整篇正文的 HTML 就全没了。
-.use(markdownItKatex, { throwOnError: false, errorColor: '#cc0000' })
-
-md.renderer.rules.heading_open = function (tokens: any, idx: number) {
-  const token = tokens[idx]
-  const next = tokens[idx + 1]
-  if (next && next.type === 'inline') {
-    const text = next.content
-    const id = text.toLowerCase().replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff\-]/g, '')
-    return `<${token.tag} id="${id}">`
-  }
-  return `<${token.tag}>`
-}
-
-const renderedHtml = computed(() => md.render(props.content || ''))
+const renderedHtml = computed(() => renderMarkdown(props.content || ''))
 const contentRef = ref<HTMLElement | null>(null)
 
 /**
@@ -204,6 +89,20 @@ async function enhance(el: HTMLElement) {
       else { const t = document.createElement('textarea'); t.value = code; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); done() }
     }
 
+    // 行号开关：默认关闭。短代码块里一排数字只是噪声，需要按行讨论（「看第 12 行」）时再打开。
+    // 数字由 CSS 的 counter 生成，这里只切 class，不重建 DOM。
+    const lineBtn = document.createElement('button')
+    lineBtn.type = 'button'
+    lineBtn.className = 'code-action-btn'
+    lineBtn.textContent = '行号'
+    lineBtn.setAttribute('aria-label', '切换行号显示')
+    lineBtn.setAttribute('aria-pressed', 'false')
+    lineBtn.onclick = () => {
+      const on = node.classList.toggle('show-line-no')
+      lineBtn.classList.toggle('is-active', on)
+      lineBtn.setAttribute('aria-pressed', String(on))
+    }
+
     // 换行开关：长行代码默认横向滚动，窄屏读者可切到自动换行
     const wrapBtn = document.createElement('button')
     wrapBtn.type = 'button'
@@ -218,6 +117,7 @@ async function enhance(el: HTMLElement) {
     }
 
     actions.appendChild(copyBtn)
+    actions.appendChild(lineBtn)
     actions.appendChild(wrapBtn)
 
     // 只在超长代码块上出现（短块没必要多一个按钮）
@@ -235,6 +135,26 @@ async function enhance(el: HTMLElement) {
     }
 
     node.appendChild(actions)
+  })
+
+  // 代码组 Tab（```java tab="后端" 连续两段以上）：面板显隐交给 CSS，这里只切 is-active。
+  // dataset 标记防止 enhance 重入时重复绑定（重复绑不是致命错，但会一次点击切两次、看起来"没反应"）。
+  el.querySelectorAll('.code-group').forEach((group) => {
+    const node = group as HTMLElement
+    if (node.dataset.tabBound === '1') return
+    node.dataset.tabBound = '1'
+    const tabs = Array.from(node.querySelectorAll<HTMLElement>('.code-group-tab'))
+    const panels = Array.from(node.querySelectorAll<HTMLElement>('.code-group-panel'))
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => {
+        tabs.forEach((t, k) => {
+          const active = k === i
+          t.classList.toggle('is-active', active)
+          t.setAttribute('aria-selected', String(active))
+        })
+        panels.forEach((p, k) => p.classList.toggle('is-active', k === i))
+      })
+    })
   })
 
   // Mermaid click to zoom

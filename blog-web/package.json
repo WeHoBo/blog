@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "nuxi dev",
-    "build": "nuxi build",
+    "build": "nuxi build && node scripts/fix-output-symlinks.mjs",
     "generate": "nuxi generate",
     "preview": "nuxi preview",
     "test": "vitest run"
@@ -24,6 +24,7 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "nuxt": "^3.12.0",
+    "pdfjs-dist": "^4.10.38",
     "pinia": "^2.1.7"
   },
   "devDependencies": {

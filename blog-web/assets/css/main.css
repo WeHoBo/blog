@@ -6,13 +6,32 @@
 
 html {
   scroll-behavior: smooth;
-  --ph: 217; /* primary hue: 217=blue, 280=purple, 160=green, 0=red, 40=orange */
-  --ps: 91%;
-  --pl: 60%;
+  /* 主题色相：22 ≈ 陶土/赤陶。
+     色相由用户通过「外观设置 → 主题色」调整（useThemeColor），饱和/明度**锁死**。
+     这两个值决定了「鲜艳」还是「柔和」，所以刻意压得很低：
+       26% 饱和 —— 高饱和（原先 44%）在绿/青几个色相上会直接变成荧光色；
+       40% 明度 —— 比原先 46% 再压一档，出来是带灰调的陶土，而不是糖果色。
+     注意：Tailwind 的 primary-50…900 也是从 --ps 派生的（见 tailwind.config.ts），
+     改这一处整站所有主题色（链接、按钮、标签、目录高亮）同步变柔和。 */
+  --ph: 22;
+  --ps: 26%;
+  --pl: 40%;
   --primary: hsl(var(--ph), var(--ps), var(--pl));
-  --primary-light: hsl(var(--ph), var(--ps), 95%);
-  --primary-dark: hsl(var(--ph), var(--ps), 45%);
+  --primary-light: hsl(var(--ph), var(--ps), 93%);
+  /* 浅色页面上作文字色用（比 --primary 再深一点，保证对比度） */
+  --primary-dark: hsl(var(--ph), var(--ps), 33%);
   --primary-bg: hsla(var(--ph), var(--ps), var(--pl), 0.1);
+  /* 页面纸面底色：body 背景与横幅底部的水波纹共用，保证两者永远同色 */
+  --page-bg: hsl(38 30% 94%);
+}
+
+.dark {
+  --page-bg: hsl(28 10% 8%);
+  /* 暗色下把强调色单独提一档明度：
+     40% 的陶土压在近黑卡片上对比只有 ~2.7:1，数字和链接会「发闷」。
+     提到 52% 后约 4.2:1，饱和度仍是 26% —— 不会变回荧光色，只是清楚一些。
+     （亮色模式不改：浅纸上 40% 已经很稳，再提反而刺眼。） */
+  --primary: hsl(var(--ph), var(--ps), 52%);
 }
 
 /* 锚点跳转避让固定顶部导航（Header 高约 64px）：
@@ -24,6 +43,29 @@ html {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+  /* 纸面色 + 墨色字：暖、低对比，长时间阅读不刺眼 */
+  background-color: var(--page-bg);
+  color: hsl(26 12% 20%);
+  -webkit-font-smoothing: antialiased;
+}
+.dark body {
+  background-color: var(--page-bg);
+  color: hsl(36 14% 84%);
+}
+
+/* 标题用衬线、正文用无衬线：杂志排版的基本对比。
+   只作用于 h1/h2（页面标题、文章标题、分区标题），
+   h3 及以下级别与后台管理界面保持无衬线——中文衬线在小字号下会发虚。 */
+.editorial h1,
+.editorial h2,
+.editorial .font-editorial {
+  font-family: Georgia, 'Songti SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'STSong', 'SimSun', serif;
+  letter-spacing: 0.01em;
+}
+
+/* 选中文本用主题淡色，不用浏览器默认的亮蓝 */
+::selection {
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.22);
 }
 
 /* 全站键盘焦点可见性：Tab 导航时能看清当前焦点位置（无障碍） */
@@ -44,15 +86,26 @@ select:focus-visible {
 .dark .theme-text { color: var(--primary); }
 .theme-text-hover { color: var(--primary-dark); }
 .dark .theme-text-hover { color: var(--primary); }
+/* 标签改成「纸标签」：中性底 + 细描边，不再每个模块一块彩色底。
+   彩色只留给链接、下划线等真正需要引导视线的地方。 */
 .theme-chip {
-  background: hsla(var(--ph), var(--ps), var(--pl), 0.12);
-  color: var(--primary-dark);
+  background: hsl(37 26% 91%);
+  color: hsl(28 12% 32%);
+  border: 1px solid hsl(36 20% 84%);
 }
-.dark .theme-chip { color: var(--primary); }
+.dark .theme-chip {
+  background: rgba(255, 255, 255, 0.05);
+  color: hsl(36 12% 76%);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+/* 无封面时的占位块：单纯的纸色，不再用双主题色渐变 */
 .theme-illustration {
-  background: linear-gradient(to bottom right,
-    hsla(var(--ph), var(--ps), var(--pl), 0.10),
-    hsla(calc(var(--ph) + 20), var(--ps), var(--pl), 0.10));
+  background: hsl(38 24% 93%);
+  color: hsl(32 12% 58%);
+}
+.dark .theme-illustration {
+  background: hsl(28 8% 17%);
+  color: hsl(32 8% 52%);
 }
 /* 卡片标题 hover 变主题色 */
 .group:hover .title-hover { color: var(--primary-dark); }
@@ -60,10 +113,10 @@ select:focus-visible {
 
 
 /* Stronger text hierarchy */
-.text-muted { color: #6b7280; }
-.dark .text-muted { color: #9ca3af; }
-strong, b { color: #1f2937; }
-.dark strong, .dark b { color: #e5e7eb; }
+.text-muted { color: hsl(32 9% 43%); }
+.dark .text-muted { color: hsl(36 10% 68%); }
+strong, b { color: hsl(26 12% 16%); }
+.dark strong, .dark b { color: hsl(36 14% 88%); }
 
 /* Article content typography */
 .article-content h1 { @apply text-3xl font-bold my-6 pb-2 border-b dark:border-gray-700; }
@@ -84,6 +137,294 @@ strong, b { color: #1f2937; }
 .article-content hr { @apply my-8 border-gray-200 dark:border-gray-700; }
 .article-content pre.hljs { @apply rounded-xl my-4 p-5 text-sm leading-relaxed overflow-x-auto; }
 
+/* ---- 阅读栏宽（reading rails） ----
+   正文收窄到舒适行宽（44rem ≈ 704px，约 38 个汉字），
+   表格 / 代码 / 行间公式 / mermaid 这类「宽元素」破栏回到卡片全宽。
+   不约束时正文会一路铺到卡片边缘，大屏上一行 45–50 个汉字读起来很累；
+   而跟着一起收窄的话，宽表格和公式又只能挤在窄栏里横向滚动。 */
+.article-content { --reading-width: 44rem; }
+.article-content > * { max-width: var(--reading-width); }
+/* .code-group 也要破栏：不然单块代码是全宽、套进 Tab 组里反而缩回 44rem，同一篇文章里两种宽度 */
+.article-content > :is(.table-wrap, .code-wrapper, .code-group, .mermaid-wrapper, p:has(> .katex-display)) {
+  max-width: 100%;
+}
+.article-content > .katex-display { max-width: 100%; }
+
+/* 表格横向滚动容器：窄屏上 4 列以上的表格不再被压成豆腐块或撑破卡片 */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 1.5rem 0;
+}
+/*
+  关键：table 本身是 `w-full`，容器再窄它也会把自己压缩成竖排文字，overflow 永远不触发。
+  给一个最小宽度（比手机屏宽），宽表才会真的溢出并出现横向滚动；
+  桌面端容器本来就更宽，这条不起作用。
+*/
+.table-wrap > table { margin-top: 0; margin-bottom: 0; min-width: 560px; }
+.table-wrap > table th { white-space: nowrap; }
+.table-wrap::-webkit-scrollbar { height: 6px; }
+.table-wrap::-webkit-scrollbar-thumb {
+  background: hsl(34 16% 73% / .8);
+  border-radius: 9999px;
+}
+.dark .table-wrap::-webkit-scrollbar-thumb { background: hsl(30 8% 34% / .9); }
+
+/* 标题锚点：悬停出现，点一下地址栏就带 #锚点，方便把「指向某一节」的链接发出去 */
+.article-content .heading-anchor {
+  margin-left: .4rem;
+  color: hsl(var(--ph) var(--ps) 55%);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.article-content :is(h1, h2, h3, h4, h5, h6):hover .heading-anchor { opacity: .65; }
+.article-content .heading-anchor:hover { opacity: 1 !important; }
+
+/* ---- 提示块（> [!NOTE] 等） ----
+   五种类型共用一套暖纸底 + 陶土竖线，只用块首的中文标签区分语义 ——
+   红黄蓝绿各来一块是最容易把"生活杂志"排版搞成告示栏的做法。 */
+.admonition {
+  margin: 1.6rem 0;
+  padding: 0.9rem 1.1rem;
+  background: hsl(38 32% 96%);
+  border: 1px solid hsl(34 22% 88%);
+  border-left: 3px solid hsl(var(--ph) var(--ps) 52%);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+.dark .admonition {
+  background: hsl(28 10% 13%);
+  border-color: hsl(28 10% 22%);
+  border-left-color: hsl(var(--ph) var(--ps) 56%);
+}
+.admonition::before {
+  content: attr(data-title);
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: hsl(var(--ph) var(--ps) 38%);
+}
+.dark .admonition::before { color: hsl(var(--ph) var(--ps) 70%); }
+.admonition > p { margin: 0.35rem 0; }
+.admonition > p:last-child { margin-bottom: 0; }
+.admonition > p:first-of-type { margin-top: 0; }
+/* 提示块里嵌代码块时，别再叠一层外间距 */
+.admonition .code-wrapper { margin: 0.5rem 0; }
+
+/* ---- 连续图片网格 ----
+   `![](a) ![](b)` 连着写两段以上会自动并排（见 markdownCore 的 imageGridPlugin）。
+   高度统一裁切，避免不同比例的截图把行高撑得参差不齐。 */
+.img-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.6rem;
+  margin: 1.6rem 0;
+  align-items: stretch;
+}
+.img-grid img {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  box-shadow: none;
+}
+
+/* ---- 搜索结果高亮 ----
+   用主题色淡底而不是浏览器默认的亮黄，保持「暖纸 + 墨色 + 单一强调色」的克制；
+   文字色继承（inherit），深色模式下不需要再单独指定，标题依然清晰。 */
+.search-hit {
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.22);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.08em;
+  font-weight: 600;
+}
+.dark .search-hit {
+  background: hsla(var(--ph), var(--ps), 62%, 0.32);
+}
+
+
+/* =====================================================================
+   壁纸层与首屏偏移
+   ---------------------------------------------------------------------
+   痛点：壁纸模式存在 localStorage，而服务端渲染时读不到它 —— 如果等
+   onMounted 再读，选了「隐藏壁纸」的人每次刷新都会先看到一张图再消失。
+   做法：head 里放一段内联脚本，在首次绘制前把模式写进
+   html[data-wallpaper]（banner / full / cover / none），下面这些规则
+   完全由这个属性和 html[data-has-wallpaper] 驱动，首帧就是最终形态。
+   ===================================================================== */
+
+#wallpaper-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 340px;
+  overflow: hidden;
+  z-index: 0;
+}
+#wallpaper-layer .wp-image {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+#wallpaper-layer .wp-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* 全屏：固定铺满视口，滚动时图片不动 */
+html[data-wallpaper="full"] #wallpaper-layer {
+  position: fixed;
+  inset: 0;
+  height: auto;
+}
+/* 覆盖：铺满整篇文档高度，跟着内容一起滚。
+   高度可能上千 px，`cover` 会把图横向放大到糊掉，所以改成按宽度铺 + 纵向重复 */
+html[data-wallpaper="cover"] #wallpaper-layer {
+  position: absolute;
+  inset: 0;
+  height: auto;
+}
+html[data-wallpaper="cover"] #wallpaper-layer .wp-image {
+  background-size: 100% auto;
+  background-repeat: repeat-y;
+  background-position: center top;
+}
+/* 隐藏：直接不渲染（Vue 侧同时会切到纸面背景） */
+html[data-wallpaper="none"] #wallpaper-layer { display: none; }
+
+/* 蒙层：浅色压米色、深色压暖褐。用 .dark 切可见性，不靠 JS 判断主题 */
+#wallpaper-layer .wp-scrim-dark { display: none; }
+.dark #wallpaper-layer .wp-scrim-light { display: none; }
+.dark #wallpaper-layer .wp-scrim-dark { display: block; }
+
+html[data-wallpaper="banner"] .wp-scrim-light {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, .10) 0%, rgba(0, 0, 0, 0) 45%, var(--page-bg) 100%);
+}
+html[data-wallpaper="full"] .wp-scrim-light {
+  background: linear-gradient(to bottom, rgba(247, 242, 232, .55), rgba(247, 242, 232, .72));
+}
+html[data-wallpaper="cover"] .wp-scrim-light {
+  background: linear-gradient(to bottom, rgba(247, 242, 232, .62), rgba(247, 242, 232, .80));
+}
+html[data-wallpaper="banner"] .wp-scrim-dark {
+  background: linear-gradient(to bottom, rgba(18, 16, 13, .58) 0%, rgba(18, 16, 13, .44) 42%, var(--page-bg) 100%);
+}
+html[data-wallpaper="full"] .wp-scrim-dark {
+  background: linear-gradient(to bottom, rgba(20, 18, 15, .68), rgba(20, 18, 15, .82));
+}
+html[data-wallpaper="cover"] .wp-scrim-dark {
+  background: linear-gradient(to bottom, rgba(20, 18, 15, .74), rgba(20, 18, 15, .88));
+}
+
+/* ---- 横幅底部水波纹（外观设置 → 波浪动画）----
+   四层同一个 path，靠 opacity 与时长差做视差；fill 必须是页面底色，
+   这样波浪看起来是"图片被纸面吃掉"，而不是贴了一条装饰带。 */
+.banner-waves {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* 往下多压 1px：图层是 overflow:hidden，正好把亚像素接缝切掉 */
+  bottom: -1px;
+  height: 10vh;
+  min-height: 50px;
+  max-height: 150px;
+  pointer-events: none;
+}
+@media (min-width: 768px) {
+  .banner-waves { height: 15vh; }
+}
+.banner-waves svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.wave-use {
+  fill: var(--page-bg);
+  animation: wave-drift 25s cubic-bezier(0.5, 0.5, 0.45, 0.5) infinite;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.wave-1 { opacity: 0.25; animation-duration: 7s; animation-delay: -2s; }
+.wave-2 { opacity: 0.5; animation-duration: 10s; animation-delay: -3s; }
+.wave-3 { opacity: 0.75; animation-duration: 13s; animation-delay: -4s; }
+.wave-4 { opacity: 1; animation-duration: 20s; animation-delay: -5s; }
+@keyframes wave-drift {
+  0% { transform: translate3d(-90px, 0, 0); }
+  100% { transform: translate3d(85px, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wave-use { animation: none; }
+}
+
+/* ---- 主题色相滑块（外观设置 → 主题色）----
+   和 Mizuki 一样的形态：渐变条 + 白色小竖条，不显示轨道圆点。
+   ⚠️ 渐变条**必须**和主题同一套饱和/明度（26% / 46%），否则拖动时看到的是荧光彩虹，
+   选完落到实际主题上却变灰 —— 预览色和结果色不一致会让人以为没生效。
+   46% 比主题的 40% 略亮一点：纯色块当背景时太暗会显得脏。 */
+.hue-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1.5rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  background-image: linear-gradient(
+    90deg,
+    hsl(0 26% 46%) 0%,
+    hsl(30 26% 46%) 8.3%,
+    hsl(60 26% 46%) 16.7%,
+    hsl(120 26% 46%) 33.3%,
+    hsl(180 26% 46%) 50%,
+    hsl(240 26% 46%) 66.7%,
+    hsl(280 26% 46%) 77.8%,
+    hsl(320 26% 46%) 88.9%,
+    hsl(360 26% 46%) 100%
+  );
+}
+.hue-slider:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--page-bg), 0 0 0 4px var(--primary);
+}
+.hue-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 1.05rem;
+  width: 0.45rem;
+  border-radius: 0.125rem;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.hue-slider::-webkit-slider-thumb:hover { background: rgba(255, 255, 255, 0.95); }
+.hue-slider::-webkit-slider-thumb:active { background: #fff; }
+.hue-slider::-moz-range-thumb {
+  height: 1.05rem;
+  width: 0.45rem;
+  border: 0;
+  border-radius: 0.125rem;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.hue-slider::-moz-range-track { background: transparent; }
+
+/* 正文上边距：横幅模式要让首屏卡片压在图片下沿，其余模式贴着导航栏开始。
+   用 ID 选择器而不是 Tailwind 类，避免和组件里的 pt-* 打架。 */
+#site-main { padding-top: 4rem; }
+html[data-has-wallpaper="1"][data-wallpaper="banner"] #site-main { padding-top: 280px; }
+@media (min-width: 640px) {
+  html[data-has-wallpaper="1"][data-wallpaper="banner"] #site-main { padding-top: 300px; }
+}
+@media (min-width: 1024px) {
+  #site-main { padding-top: 5rem; }
+}
+
 /* ---- LaTeX 数学公式（KaTeX） ----
    颜色刻意不写死：KaTeX 自身不设 color，公式跟着正文继承，
    浅色/夜间模式自动适配，不需要额外的 .dark 覆盖。 */
@@ -97,18 +438,22 @@ strong, b { color: #1f2937; }
   background: #fefcf5 !important;
   border: 1px solid #e8e0d5;
   font-family: 'Consolas', 'Monaco', 'Fira Code', 'Courier New', monospace;
-  padding-left: 3.5rem !important;
+  /* 行号默认关闭，所以默认不留行号槽（原来的 3.5rem 会让代码整体右移、左侧空一条） */
+  padding-left: 1.25rem !important;
   counter-reset: line;
 }
+/* 「行号」按钮打开后才有槽位与数字：显示行号必须同时扩左边距，否则数字会压到代码上 */
+.code-wrapper.show-line-no pre.hljs { padding-left: 3.5rem !important; }
+.code-wrapper:not(.show-line-no) .line-no { display: none; }
 .dark .code-wrapper pre.hljs {
-  background: #1a1d23 !important;
-  border-color: #2d3139;
+  background: #1c1815 !important;
+  border-color: #36302a;
 }
 
 /* 暗色模式语法高亮：等价于 highlight.js 的 github-dark 主题。
    这里手写而不再 @import 一份，是因为两套主题若同时全局引入会互相覆盖，
    无法按 .dark 切换到正确的那一套。 */
-.dark .hljs { color: #c9d1d9; background: #0d1117; }
+.dark .hljs { color: #ded6c8; background: #1c1815; }
 .dark .hljs-doctag,
 .dark .hljs-keyword,
 .dark .hljs-meta .hljs-keyword,
@@ -166,33 +511,48 @@ strong, b { color: #1f2937; }
   user-select: none;
 }
 .dark .code-wrapper .line-no::before { color: #6b7280; }
+/* 左上角徽标：语言小色块 + 文件名。
+   语言徽标用暖灰底 + 主题色描边，不用高饱和小色块 —— 全站只有一个陶土强调色。 */
 .code-lang-label {
   position: absolute; top: 0; left: 12px;
-  padding: 1px 10px; font-size: 10px;
-  background: rgba(59,130,246,0.1); color: #3b82f6;
-  border-radius: 0 0 6px 6px; z-index: 2;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  max-width: 60%; overflow: hidden;
+  z-index: 2;
 }
-.dark .code-lang-label { background: rgba(59,130,246,0.15); }
-/* 有 title= 时标签展示的是文件名：不该被转成大写，用等宽字体更像"文件名" */
-.code-lang-label.is-file {
-  text-transform: none;
-  font-family: 'Consolas', 'Monaco', 'Fira Code', 'Courier New', monospace;
-  letter-spacing: 0;
-  /* 长路径别顶到右上角的按钮组 */
-  max-width: 55%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.code-lang-badge {
+  display: inline-block; padding: 2px 8px;
+  font-size: 10px; font-weight: 600; line-height: 1.3;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: hsl(var(--ph) var(--ps) 38%);
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.12);
+  border: 1px solid hsla(var(--ph), var(--ps), var(--pl), 0.3);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
   white-space: nowrap;
 }
-
-/* 行高亮（围栏元信息 {3-5}）：左侧色条 + 淡底，暗色下同色加深 */
-.code-wrapper .line.line-highlight {
-  background: rgba(59,130,246,0.10);
-  box-shadow: inset 3px 0 0 0 #3b82f6;
+.dark .code-lang-badge {
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.2);
+  border-color: hsla(var(--ph), var(--ps), var(--pl), 0.34);
+  color: hsl(var(--ph) var(--ps) 70%);
 }
-.dark .code-wrapper .line.line-highlight { background: rgba(59,130,246,0.16); }
+/* 文件名：不该被转成大写，用等宽字体更像"文件名" */
+.code-lang-name {
+  font-family: 'Consolas', 'Monaco', 'Fira Code', 'Courier New', monospace;
+  font-size: 10px; font-weight: 600;
+  color: #8b8378;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dark .code-lang-name { color: #9a938a; }
+/* 带文件名时是「徽标 + 名字」两段，允许名字压缩成省略号 */
+.code-lang-label.is-file { max-width: 64%; }
+
+/* 行高亮（围栏元信息 {3-5}）：左侧色条 + 淡底，暗色下同色加深。
+   这里原本写死了蓝色，与「单一陶土强调色」冲突，改走主题色变量。 */
+.code-wrapper .line.line-highlight {
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.1);
+  box-shadow: inset 3px 0 0 0 var(--primary);
+}
+.dark .code-wrapper .line.line-highlight { background: hsla(var(--ph), var(--ps), var(--pl), 0.18); }
 
 /* 超长代码块默认折叠：底部渐隐 + 右上角「展开」按钮 */
 .code-wrapper.code-collapsed pre.hljs {
@@ -216,7 +576,19 @@ strong, b { color: #1f2937; }
 /* Mermaid */
 .mermaid-wrapper { @apply my-4 cursor-pointer; }
 .mermaid-wrapper svg { max-width: 100%; height: auto; }
-.article-content :not(pre) > code { @apply bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-md px-1.5 py-0.5 text-sm font-mono; }
+/* 行内代码：原来的 rose（玫红）是上一版亮色主题的遗留，和「暖纸 + 墨色 + 单一陶土色」冲突，
+   改成暖纸底 + 深陶土字，视觉上更接近铅字排版里的"夹注" */
+.article-content :not(pre) > code {
+  @apply rounded-md px-1.5 py-0.5 text-sm font-mono;
+  background: hsl(36 30% 92%);
+  color: hsl(20 45% 33%);
+  border: 1px solid hsl(34 22% 86%);
+}
+.dark .article-content :not(pre) > code {
+  background: hsl(28 12% 20%);
+  color: hsl(26 52% 72%);
+  border-color: hsl(28 10% 27%);
+}
 
 /* 代码块右上角按钮组（复制 / 换行 / 展开） */
 .code-actions {
@@ -231,11 +603,48 @@ strong, b { color: #1f2937; }
 }
 .code-action-btn {
   padding: 2px 8px; font-size: 11px; border-radius: 6px;
-  background: #374151; color: #d1d5db; border: none; cursor: pointer;
+  background: hsl(26 10% 26%); color: hsl(36 20% 88%); border: none; cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.code-action-btn:hover { background: #4b5563; color: white; }
-.code-action-btn.is-active { background: #2563eb; color: white; }
+.code-action-btn:hover { background: hsl(26 10% 18%); color: white; }
+.code-action-btn.is-active { background: var(--primary); color: white; }
+
+/* ---- 代码组（同段逻辑的多语言版本）----
+   ```java tab="后端 Java"  ```vue tab="前端 Vue"
+   连续两段以上自动成组；切换逻辑在 MarkdownRenderer 的 enhance 里（点击 tab 换 is-active）。 */
+.code-group { margin: 1.25rem 0; }
+.code-group-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 0.5rem; padding-left: 2px;
+}
+.code-group-tab {
+  padding: 0.2rem 0.7rem;
+  font-size: 12px; line-height: 1.5;
+  color: #8b8378;
+  background: transparent;
+  border: 1px solid #e2dacd;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.code-group-tab:hover { color: #4a4237; border-color: #d3c8b7; }
+.code-group-tab.is-active {
+  color: #3d362c;
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.1);
+  border-color: hsla(var(--ph), var(--ps), var(--pl), 0.4);
+  font-weight: 600;
+}
+.dark .code-group-tab { color: #9a938a; border-color: #36302a; }
+.dark .code-group-tab:hover { color: #d6cfc4; border-color: #4a4238; }
+.dark .code-group-tab.is-active {
+  color: hsl(36 18% 88%);
+  background: hsla(var(--ph), var(--ps), var(--pl), 0.22);
+  border-color: hsla(var(--ph), var(--ps), var(--pl), 0.45);
+}
+.code-group-panel { display: none; }
+.code-group-panel.is-active { display: block; }
+/* tab 与代码卡之间不该再有一层外边距，否则像两个不相干的块 */
+.code-group .code-wrapper pre.hljs { margin-top: 0 !important; }
 
 /* Footnote styles */
 .article-content .footnotes { @apply mt-10 pt-6 border-t dark:border-gray-700 text-sm; }
@@ -255,6 +664,30 @@ strong, b { color: #1f2937; }
   to { opacity: 1; transform: translateY(0); }
 }
 .page-enter { animation: fadeInUp 0.4s ease-out; }
+
+/* ---- 主题切换：圆形扩散（P2-10）----
+   换了主题时浏览器会把新旧两帧都拍成快照叠在一起，我们只让「新」的那张从开关位置
+   用一个圆慢慢揭开。圆心/半径由 utils/viewTransition.ts 写到 <html> 的行内变量上。
+   默认值给的是视口正中 + 150vmax，所以就算变量没写上也能正常播完。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-reveal 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes theme-reveal {
+  from { clip-path: circle(0 at var(--vt-cx, 50%) var(--vt-cy, 50%)); }
+  to { clip-path: circle(var(--vt-r, 150vmax) at var(--vt-cx, 50%) var(--vt-cy, 50%)); }
+}
+/* 系统开了「减少动态效果」时不播动画（JS 也会走直接切换，这里兜底） */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+}
 
 /* Link underline effect */
 .hover-underline {
@@ -341,22 +774,19 @@ strong, b { color: #1f2937; }
   border-color: rgba(255,255,255,0.06);
 }
 
-/* Neon glow text：浅色模式也需要定义，否则该 class 在浅色下完全无效 */
+/* Neon glow text：已从文章标题移除。原先 .dark 分支写死了蓝色 rgba(59,130,246)，
+   和「单一陶土色」的主题规范冲突，只保留浅色分支供其他地方按需使用 */
 .neon-glow {
   text-shadow: 0 0 6px hsla(var(--ph), var(--ps), var(--pl), 0.30);
-}
-.dark .neon-glow {
-  text-shadow: 0 0 7px rgba(59,130,246,0.5), 0 0 20px rgba(59,130,246,0.2);
-}
-.dark .neon-glow-pink {
-  text-shadow: 0 0 7px rgba(236,72,153,0.5), 0 0 20px rgba(236,72,153,0.2);
 }
 
 .rotate-y-180 { transform: rotateY(180deg); }
 
-/* Gradient text */
+/* Gradient text：后台标题用。
+   原先是蓝→紫→粉的冷色渐变（上一版亮色主题遗留），改成主题色的深→浅渐变，
+   只保留"一点层次"，不引入新的色相。 */
 .gradient-text {
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+  background: linear-gradient(135deg, var(--primary), hsl(var(--ph) var(--ps) 62%));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

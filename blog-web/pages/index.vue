@@ -2,13 +2,18 @@
   <div class="max-w-7xl mx-auto">
     <!-- 轻量 Hero：左侧问候 / 中间站点概览 / 右侧热门标签，把整条横幅填满，避免中间和右侧大片留白 -->
     <div class="px-4 pt-6 pb-1 lg:px-0">
-      <div class="rounded-2xl bg-white/60 dark:bg-gray-800/60 backdrop-blur border border-white/50 dark:border-gray-700/60 px-6 sm:px-10 py-8 relative overflow-hidden">
-        <div class="absolute -right-10 -top-10 w-48 h-48 rounded-full opacity-15" style="background: radial-gradient(circle, hsl(var(--ph) var(--ps) 60%) 0%, transparent 70%)"></div>
+      <div class="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-paper px-6 sm:px-10 py-8 relative overflow-hidden">
         <div class="relative grid gap-6 lg:gap-8 lg:grid-cols-[1.5fr_1fr_1.1fr] lg:items-center">
-          <!-- 左：问候 + 关注方向 + 行动按钮 -->
+          <!-- 左：问候 + 关注方向 + 行动按钮
+               文案来自后台「站点设置」（博主名称/简介/头像），取不到就回落到默认值，
+               所以后台没配也不会出现空白横幅。 -->
           <div class="min-w-0">
-            <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-gray-100">你好，我是好啵 👋</h1>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1.5">记录我的计算机学习与技术实践</p>
+            <div class="flex items-center gap-2.5">
+              <img v-if="bloggerAvatar" :src="ossImage(bloggerAvatar, { w: IMG_W.avatar })" :alt="bloggerName"
+                loading="lazy" decoding="async" class="w-10 h-10 rounded-full object-cover ring-1 ring-gray-200 dark:ring-gray-600 shrink-0" />
+              <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-gray-100 truncate">你好，我是{{ bloggerName }} 👋</h1>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1.5">{{ heroSubtitle }}</p>
             <div class="mt-3">
               <div class="text-[11px] font-bold text-gray-400 mb-1.5 tracking-wide">关注方向</div>
               <div class="flex flex-wrap items-center gap-2">
@@ -16,8 +21,8 @@
               </div>
             </div>
             <div class="flex gap-3 mt-4">
-              <a href="#articles" class="px-4 py-1.5 rounded-full bg-primary-600 text-white text-xs font-medium hover:bg-primary-700 transition">开始阅读</a>
-              <NuxtLink to="/about" class="px-4 py-1.5 rounded-full border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition">关于我</NuxtLink>
+              <a href="#articles" class="px-4 py-1.5 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-medium hover:opacity-85 transition">开始阅读</a>
+              <NuxtLink to="/about" class="px-4 py-1.5 rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition">关于我</NuxtLink>
             </div>
           </div>
 
@@ -34,7 +39,7 @@
             <div class="text-[11px] font-bold text-gray-400 mb-2 tracking-wide">热门标签</div>
             <div class="flex flex-wrap gap-1.5">
               <NuxtLink v-for="t in hotTags.slice(0, 6)" :key="t.id" :to="taxonomyPath('/tag', t)"
-                class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-white/70 dark:bg-gray-700/60 text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-600 hover:bg-primary-50 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
+                class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-transparent text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-400 transition">
                 {{ t.name }}
                 <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
               </NuxtLink>
@@ -59,7 +64,7 @@
             <!-- 全部 -->
             <button @click="currentCategory = undefined; pageNum = 1"
               :class="!currentCategory
-                ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 border-l-2 border-primary-600'
+                ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 border-l-2 border-primary-600'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
               class="w-full text-left px-4 py-2 text-sm font-medium transition flex items-center gap-2">
               <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z"/></svg>
@@ -85,7 +90,7 @@
                 <div v-if="cat.children && cat.children.length && isExpanded(cat.id)" class="pb-1">
                   <button v-for="child in cat.children" :key="child.id" @click="currentCategory = child.id; pageNum = 1"
                     :class="currentCategory === child.id
-                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 border-l-2 border-primary-600'
+                      ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 border-l-2 border-primary-600'
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
                     class="w-full text-left pl-9 pr-3 py-1.5 text-sm transition flex items-center gap-2">
                     <span class="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600 flex-shrink-0"></span>
@@ -108,7 +113,7 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10"/></svg>
             分类
           </button>
-          <span v-if="currentCategory" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-xs">
+          <span v-if="currentCategory" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 text-xs">
             {{ pageTitle }}
             <button @click="clearFilters" class="ml-0.5 hover:text-primary-800">✕</button>
           </span>
@@ -119,16 +124,18 @@
           <h2 class="text-base font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
             <span class="w-1 h-5 bg-primary-600 rounded-full"></span>
             {{ pageTitle }}
+            <!-- 搜索时把命中总数摆出来：避免「只有 1 篇」被误认为「没搜到」 -->
+            <span v-if="keyword && !loading" class="text-xs font-normal text-gray-400">{{ totalMatched }} 篇</span>
           </h2>
           <div class="flex bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-1">
             <button @click="setViewMode('list')" title="列表视图"
               class="px-2.5 py-1 rounded-md text-sm transition"
-              :class="viewMode === 'list' ? 'bg-primary-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'">
+              :class="viewMode === 'list' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
             </button>
             <button @click="setViewMode('grid')" title="网格视图"
               class="px-2.5 py-1 rounded-md text-sm transition"
-              :class="viewMode === 'grid' ? 'bg-primary-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'">
+              :class="viewMode === 'grid' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
             </button>
           </div>
@@ -155,21 +162,22 @@
         <div v-else-if="articles.length === 0" class="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-16 text-center text-gray-400">
           <span class="text-4xl mb-4 block">🔍</span>
           <p class="text-gray-500 dark:text-gray-400 font-medium">{{ emptyText }}</p>
-          <p class="text-xs mt-1 opacity-70">换个关键词或分类试试？</p>
+          <!-- 搜不到时把搜索范围说清楚：正文不参与匹配，避免用户以为站内没有这篇 -->
+          <p class="text-xs mt-1 opacity-70">换个关键词试试？可搜索标题、摘要、标签与分类</p>
           <button v-if="keyword || currentCategory || currentTag" @click="clearFilters"
-            class="mt-4 px-4 py-1.5 rounded-full bg-primary-600 text-white text-xs hover:bg-primary-700 transition">
+            class="mt-4 px-4 py-1.5 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs hover:opacity-85 transition">
             清除筛选
           </button>
         </div>
 
         <!-- List view -->
         <div v-else-if="viewMode === 'list'" class="space-y-3">
-          <ArticleCard v-for="article in articles" :key="article.id" :article="article" />
+          <ArticleCard v-for="article in articles" :key="article.id" :article="article" :keyword="keyword" />
         </div>
 
         <!-- Grid view -->
         <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <ArticleCard v-for="article in articles" :key="article.id" :article="article" layout="grid" />
+          <ArticleCard v-for="article in articles" :key="article.id" :article="article" layout="grid" :keyword="keyword" />
         </div>
 
         <Pagination v-if="totalPages > 1" :current="pageNum" :total="totalPages" @change="pageNum = $event" />
@@ -187,14 +195,14 @@
               <div v-if="hotArticles.length" class="space-y-1 mb-3">
                 <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="articlePath(a)"
                   class="flex items-start gap-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
-                  <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
+                  <span :class="i < 3 ? 'text-primary-600' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
                   <span class="flex-1 min-w-0 text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug">{{ a.title }}</span>
                 </NuxtLink>
               </div>
               <!-- 热门标签 -->
               <div v-if="hotTags.length" class="flex flex-wrap gap-1.5 pt-3 border-t dark:border-gray-700">
                 <NuxtLink v-for="t in hotTags" :key="t.id" :to="taxonomyPath('/tag', t)"
-                  class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
+                  class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 hover:text-primary-600 dark:hover:text-primary-400 transition">
                   {{ t.name }}
                   <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
                 </NuxtLink>
@@ -225,9 +233,9 @@
           <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden mb-4">
             <div class="p-4 text-center">
               <template v-if="authStore.isLoggedIn && authStore.user">
-                <img v-if="authStore.user.avatar" :src="authStore.user.avatar" :alt="authStore.user.nickname"
+                <img v-if="authStore.user.avatar" :src="ossImage(authStore.user.avatar, { w: IMG_W.avatar })" :alt="authStore.user.nickname"
                   class="w-16 h-16 mx-auto rounded-full object-cover mb-3" />
-                <div v-else class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white font-bold text-xl mb-3">
+                <div v-else class="w-16 h-16 mx-auto rounded-full bg-primary-600 flex items-center justify-center text-white font-bold text-xl mb-3">
                   {{ authStore.user.nickname?.[0] || authStore.user.username?.[0] || 'B' }}
                 </div>
                 <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">{{ authStore.user.nickname || authStore.user.username }}</div>
@@ -235,10 +243,10 @@
                 <NuxtLink to="/profile" class="inline-block mt-2 text-xs text-primary-600 dark:text-primary-400 hover:underline">个人主页 →</NuxtLink>
               </template>
               <template v-else>
-                <div class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-2xl mb-3">👤</div>
+                <div class="w-16 h-16 mx-auto rounded-full bg-primary-600 flex items-center justify-center text-white text-2xl mb-3">👤</div>
                 <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">未登录</div>
                 <p class="text-xs text-gray-500 mt-1 leading-relaxed">登录后查看更多功能</p>
-                <NuxtLink to="/login" class="inline-block mt-2 px-3 py-1 rounded-full bg-primary-600 text-white text-xs hover:bg-primary-700 transition">立即登录</NuxtLink>
+                <NuxtLink to="/login" class="inline-block mt-2 px-3 py-1 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs hover:opacity-85 transition">立即登录</NuxtLink>
               </template>
             </div>
           </div>
@@ -272,7 +280,7 @@
             </div>
             <div class="p-3 space-y-1">
               <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="articlePath(a)" class="flex items-start gap-2 py-2 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
-                <span :class="i < 3 ? 'text-red-500' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
+                <span :class="i < 3 ? 'text-primary-600' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
                 <span class="flex-1 min-w-0">
                   <span class="text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug hover:text-primary-600 dark:hover:text-primary-400 transition">{{ a.title }}</span>
                   <span v-if="a.categoryName" class="block text-xs opacity-50 mt-0.5">{{ a.categoryName }}</span>
@@ -288,7 +296,7 @@
             </div>
             <div class="p-3 flex flex-wrap gap-1.5">
               <NuxtLink v-for="t in hotTags" :key="t.id" :to="taxonomyPath('/tag', t)"
-                class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-600 dark:hover:text-primary-400 transition">
+                class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 hover:text-primary-600 dark:hover:text-primary-400 transition">
                 {{ t.name }}
                 <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
               </NuxtLink>
@@ -310,13 +318,13 @@
             </div>
             <div class="p-3">
               <button @click="currentCategory = undefined; pageNum = 1; mobileCatOpen = false"
-                :class="!currentCategory ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400' : 'text-gray-600 dark:text-gray-400'"
+                :class="!currentCategory ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'"
                 class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium transition flex items-center gap-2">
                 <span class="flex-1">全部文章</span>
               </button>
               <template v-for="cat in categoryTree" :key="cat.id">
                 <button @click="selectCategory(cat); mobileCatOpen = false"
-                  :class="currentCategory === cat.id ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400' : 'text-gray-600 dark:text-gray-400'"
+                  :class="currentCategory === cat.id ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'"
                   class="w-full text-left px-4 py-2.5 rounded-xl text-sm transition flex items-center gap-2 mt-0.5">
                   <span v-html="catIcon(cat.name)" class="flex-shrink-0"></span>
                   <span class="flex-1">{{ cat.name }}</span>
@@ -343,6 +351,7 @@
 // 标签改跳独立落地页 /tag/{slug}，而不是回退到首页的 ?tagId= 过滤
 // （聚合页此前没有独立 URL，等于把 SEO 权重都让给了首页）
 import { taxonomyPath } from '~/utils/taxonomy'
+import { ossImage, IMG_W } from '~/utils/image'
 // 文章链接统一走 articlePath()，避免 /post/{slug} 与 /article/{id} 混用
 import { articlePath } from '~/utils/articlePath'
 
@@ -362,10 +371,34 @@ const tags = ref<any[]>([])
 const hotArticles = ref<any[]>([])
 const totalPages = ref(0)
 const totalArticles = ref(0)
+/** 当前筛选条件下的命中总数（搜索时用来告诉用户「找到了多少篇」） */
+const totalMatched = ref(0)
 const loading = ref(true)
 const mobileCatOpen = ref(false)
+// 窄屏「热门内容」折叠面板的开关（此前模板引用了但未声明，
+// 导致点击无效、Vue 每次渲染都告警）
+const mobileAsideOpen = ref(false)
 
 const { viewMode, setViewMode, sortMode } = useLayout()
+
+/* ---------------------------------------------------------------
+   横幅文案（Banner Title）
+   原来这行「你好，我是好啵」是写死在模板里的，想改一个字得改代码重新构建；
+   后台「站点设置」里本来就有 bloggerName / bloggerBio / bloggerAvatar / siteDesc
+   四个字段，却一个都没被前台使用（待办清单第 3 条）。
+   现在统一走 useSiteConfig（与布局里的壁纸共用同一次请求），取不到就回落到原文案。
+   --------------------------------------------------------------- */
+const { data: siteCfg } = await useSiteConfig()
+
+const bloggerName = computed(() => (siteCfg.value?.bloggerName || '').trim() || '好啵')
+const bloggerAvatar = computed(() => (siteCfg.value?.bloggerAvatar || '').trim())
+const heroSubtitle = computed(() => {
+  // 简介允许分多行（常见写法是「📝 记录技术成长 / 💻 分享编程心得」），
+  // 横幅只要第一行：多了会把卡片撑高，和右侧标签栏对不齐。
+  const bio = (siteCfg.value?.bloggerBio || '')
+    .split('\n').map((s) => s.trim()).find(Boolean) || ''
+  return bio || (siteCfg.value?.siteDesc || '').trim() || '记录我的计算机学习与技术实践'
+})
 
 const pageTitle = computed(() => {
   if (keyword.value) return `搜索：${keyword.value}`
@@ -427,7 +460,7 @@ function catBtnClass(cat: any) {
   const active = currentCategory.value === cat.id
   const base = 'w-full text-left px-3 py-2 text-sm transition flex items-center gap-1.5 border-l-2 border-transparent'
   return active
-    ? base + ' bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 border-primary-600'
+    ? base + ' bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 border-primary-600'
     : base + ' text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
 }
 
@@ -466,7 +499,7 @@ const siteStats = computed(() => [
 ])
 
 /** 拉取文章列表（只返回数据，便于首屏 SSR 序列化复用） */
-async function loadArticles(): Promise<{ records: any[]; pages: number }> {
+async function loadArticles(): Promise<{ records: any[]; pages: number; total: number }> {
   const params = new URLSearchParams({ pageNum: String(pageNum.value), pageSize: String(15) })
   if (currentCategory.value) params.set('categoryId', String(currentCategory.value))
   if (currentTag.value) params.set('tagId', String(currentTag.value))
@@ -474,18 +507,23 @@ async function loadArticles(): Promise<{ records: any[]; pages: number }> {
   if (sortMode.value) params.set('sort', sortMode.value)
   const res = await get<any>(`/article/list?${params.toString()}`)
   if (res?.code === 200 && res.data) {
-    return { records: res.data.records || [], pages: res.data.pages || 0 }
+    return {
+      records: res.data.records || [],
+      pages: res.data.pages || 0,
+      total: res.data.total || 0
+    }
   }
-  return { records: [], pages: 0 }
+  return { records: [], pages: 0, total: 0 }
 }
 
 /** 用户翻页 / 切换筛选时的增量加载（首屏由下方 useAsyncData 负责） */
 async function fetchArticles() {
   loading.value = true
   try {
-    const { records, pages } = await loadArticles()
+    const { records, pages, total } = await loadArticles()
     articles.value = records
     totalPages.value = pages
+    totalMatched.value = total
   } catch { /* 网络异常不阻塞页面 */ } finally { loading.value = false }
 }
 
@@ -496,7 +534,7 @@ const { data: homeInit } = await useAsyncData('home-init', async () => {
     get<any>('/category/list').catch(() => null),
     get<any>('/article/tags').catch(() => null),
     get<any>('/article/list?pageSize=5').catch(() => null),
-    loadArticles().catch(() => ({ records: [], pages: 0 }))
+    loadArticles().catch(() => ({ records: [], pages: 0, total: 0 }))
   ])
   const categories: any[] = catRes?.code === 200 ? (catRes.data || []) : []
   const hot: any[] = hotRes?.code === 200 ? (hotRes.data?.records || []) : []
@@ -506,6 +544,7 @@ const { data: homeInit } = await useAsyncData('home-init', async () => {
     hotArticles: [...hot].sort((a: any, b: any) => b.viewCount - a.viewCount).slice(0, 5),
     articles: art.records,
     totalPages: art.pages,
+    totalMatched: art.total,
     // 文章总数给 Hero 的「站点概览」用；顺手复用已经发出的 hot 请求，不额外增加接口调用
     totalArticles: hotRes?.code === 200 ? (hotRes.data?.total || 0) : 0
   }
@@ -520,6 +559,7 @@ if (homeInit.value) {
   hotArticles.value = d.hotArticles
   articles.value = d.articles
   totalPages.value = d.totalPages
+  totalMatched.value = d.totalMatched || 0
   totalArticles.value = d.totalArticles || 0
 }
 loading.value = false
@@ -541,11 +581,16 @@ watch(() => route.query.tagId, (val) => {
   fetchArticles()
 })
 
+// 站点名 / 描述也走后台「站点设置」：填了就用，没填回落到原有文案（SEO 不能因为漏配而变空）
+const siteName = computed(() => (siteCfg.value?.siteName || '').trim() || '好啵博客')
+const siteDesc = computed(() => (siteCfg.value?.siteDesc || '').trim()
+  || '一个程序员的个人技术博客：记录 Java / SpringBoot / Vue / Nuxt / Python / Linux / Docker 等技术思考、编程心得与学习笔记。')
+
 useSeoMeta({
-  title: '好啵博客 - codeup.asia',
-  description: '一个程序员的个人技术博客：记录 Java / SpringBoot / Vue / Nuxt / Python / Linux / Docker 等技术思考、编程心得与学习笔记。',
-  ogTitle: '好啵博客 - codeup.asia',
-  ogDescription: '一个程序员的个人技术博客，记录技术思考与编程心得。',
+  title: () => `${siteName.value} - codeup.asia`,
+  description: () => siteDesc.value,
+  ogTitle: () => `${siteName.value} - codeup.asia`,
+  ogDescription: () => siteDesc.value,
   ogImage: 'https://codeup.asia/apple-touch-icon.png',
   ogType: 'website'
 })

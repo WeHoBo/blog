@@ -1,11 +1,25 @@
 ﻿<template>
   <div class="flex gap-6">
-    <!-- Left TOC sidebar -->
-    <aside class="hidden lg:block w-56 flex-shrink-0">
+    <!--
+      左侧目录。可以手动收起（借鉴 DeepSeek 的「收起边栏」）：
+      长文读者常把目录当噪音，但又不想每次都靠浏览器缩放；收起后左侧留一条窄轨，
+      点一下就能展开，比在顶栏多一个按钮更贴近阅读动线。
+      状态存 localStorage，下次打开还是收起（只在 lg 以上出现，移动端本来就没有目录）。
+    -->
+    <aside v-if="hasToc && !tocCollapsed" class="hidden lg:block w-56 flex-shrink-0">
       <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
-        <TableOfContents :content="article.contentMd || ''" />
+        <TableOfContents :content="article.contentMd || ''" collapsible @collapse="toggleToc" />
       </div>
     </aside>
+    <button v-else-if="hasToc" type="button" @click="toggleToc"
+      class="hidden lg:inline-flex items-center justify-center self-start sticky top-20 w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+      title="展开目录" aria-label="展开目录">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="3" y="4" width="18" height="16" rx="2.5" />
+        <path d="M9 4v16" stroke-linecap="round" />
+        <path d="M12 9.5L14.5 12 12 14.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
 
     <!-- Main content -->
     <main class="flex-1 min-w-0">
@@ -19,16 +33,16 @@
           <div class="flex items-start gap-4 sm:gap-6">
             <!-- 左：标题 + 标题下方的全部元信息 -->
             <div class="flex-1 min-w-0">
-              <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4 neon-glow">
+              <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4">
                 {{ article.title }}
               </h1>
               <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-400">
                 <span>{{ article.createTime?.substring(0, 10) }}</span>
                 <span v-if="author" class="flex items-center gap-1">
-                  <img v-if="author.avatar" :src="author.avatar" class="w-5 h-5 rounded-full object-cover" />
+                  <img v-if="author.avatar" :src="ossImage(author.avatar, { w: IMG_W.avatar })" alt="" loading="lazy" decoding="async" class="w-5 h-5 rounded-full object-cover" />
                   <span>{{ author.nickname || author.username }}</span>
                 </span>
-                <span>👁 {{ article.viewCount }} 阅读</span>
+                <span>👁 {{ viewCountLive }} 阅读</span>
                 <span>📝 {{ wordCount }} 字</span>
                 <ReadingTime :content="article.contentMd || ''" />
                 <span>💬 {{ commentTotal || article.commentCount || 0 }} 评论</span>
@@ -45,7 +59,7 @@
             <!-- 右：约方形封面缩略图（不再撑满整行，和左侧信息同高起步） -->
             <div v-if="article.cover"
               class="flex-shrink-0 w-20 h-20 sm:w-28 sm:h-28 lg:w-32 lg:h-32 rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-700 ring-1 ring-black/5 dark:ring-white/10 shadow-sm">
-              <img :src="article.cover" :alt="article.title" loading="lazy" class="w-full h-full object-cover" />
+              <img :src="ossImage(article.cover, { w: IMG_W.thumb })" :alt="article.title" loading="lazy" decoding="async" class="w-full h-full object-cover" />
             </div>
           </div>
         </div>
@@ -90,7 +104,7 @@
       <!-- Author card -->
       <div v-if="author" class="mt-10 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 flex items-center gap-4">
         <div v-if="author.avatar" class="w-14 h-14 rounded-full bg-primary-100 overflow-hidden flex-shrink-0">
-          <img :src="author.avatar" class="w-full h-full object-cover" />
+          <img :src="ossImage(author.avatar, { w: IMG_W.avatar })" :alt="author.nickname" loading="lazy" decoding="async" class="w-full h-full object-cover" />
         </div>
         <div v-else class="w-14 h-14 rounded-full bg-primary-600 flex items-center justify-center text-white font-bold text-xl flex-shrink-0">{{ (author.nickname || author.username)?.[0] || '?' }}</div>
         <div class="flex-1">
@@ -117,6 +131,9 @@
                 <div class="flex items-center gap-2 text-xs text-gray-400 mb-2">
                   <span class="font-medium text-gray-600 dark:text-gray-300">{{ c.nickname || c.username || '匿名' }}</span>
                   <span>{{ c.createTime?.substring(0, 16) }}</span>
+                  <!-- 自己的评论不显示举报；未登录时点了只提示去登录，不偷偷发请求 -->
+                  <button v-if="canReport(c)" @click="openReport(c)"
+                    class="ml-auto text-gray-300 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition">举报</button>
                 </div>
                 <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{{ c.content }}</p>
               </div>
@@ -157,7 +174,7 @@
             <NuxtLink v-for="r in related" :key="r.id" :to="articlePath(r)"
               class="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition group">
               <div class="w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700">
-                <img v-if="r.cover" :src="r.cover" :alt="r.title" loading="lazy" class="w-full h-full object-cover" />
+                <img v-if="r.cover" :src="ossImage(r.cover, { w: IMG_W.card })" :alt="r.title" loading="lazy" decoding="async" class="w-full h-full object-cover" />
                 <div v-else class="w-full h-full flex items-center justify-center">
                   <svg class="w-6 h-6 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z"/></svg>
                 </div>
@@ -175,6 +192,29 @@
         </div>
       </div>
     </main>
+
+    <!-- 举报弹窗 -->
+    <Teleport to="body">
+      <div v-if="reportTarget" class="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center px-4" @click.self="closeReport">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-sm p-5">
+          <h4 class="font-bold text-gray-900 dark:text-gray-100">举报评论</h4>
+          <p class="text-xs text-gray-400 mt-1 mb-3 line-clamp-2 break-words">{{ reportTarget.content }}</p>
+          <div class="space-y-2">
+            <label v-for="r in reportReasons" :key="r" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+              <input v-model="reportReason" type="radio" :value="r" class="accent-primary-600" />
+              {{ r }}
+            </label>
+          </div>
+          <div class="flex justify-end gap-2 mt-5">
+            <button @click="closeReport" class="px-4 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">取消</button>
+            <button @click="submitReport" :disabled="reportSubmitting"
+              class="px-4 py-1.5 rounded-lg text-sm bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 transition">
+              {{ reportSubmitting ? '提交中...' : '提交举报' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 选中文本：AI 解释工具条（Teleport 放在根节点内，保证页面单根，避免过渡卡死） -->
     <Teleport to="body">
@@ -204,6 +244,9 @@
  */
 import { articlePath } from '~/utils/articlePath'
 import { taxonomyPath } from '~/utils/taxonomy'
+// 封面/头像按显示尺寸取图：缩略图 320、头像 160、相关推荐 640（见 utils/image.ts 顶部说明）
+import { ossImage, IMG_W } from '~/utils/image'
+import { extractHeadings } from '~/utils/markdownCore'
 
 const props = defineProps<{
   article: any
@@ -211,7 +254,7 @@ const props = defineProps<{
   author?: any
 }>()
 
-const { get } = useApi()
+const { get, post } = useApi()
 const authStore = useAuthStore()
 const aiChat = useAiChat()
 
@@ -219,6 +262,41 @@ const articleId = computed(() => props.article?.id)
 const tags = computed<any[]>(() => props.tags || [])
 const author = computed<any>(() => props.author || null)
 const wordCount = computed(() => props.article?.wordCount || 0)
+
+/**
+ * 目录折叠（借鉴 DeepSeek 的「收起边栏」）。
+ * 状态存 localStorage，默认展开 —— 老读者升级后不该突然找不到目录。
+ * 只影响 lg 以上（移动端本来就没有左侧目录列）。
+ */
+const TOC_COLLAPSED_KEY = 'toc_collapsed'
+const tocCollapsed = ref(false)
+/** 用和 TableOfContents 同一套 extractHeadings 判断有没有目录，避免空列占位 */
+const hasToc = computed(() => extractHeadings(props.article?.contentMd || '').length > 0)
+function toggleToc() {
+  tocCollapsed.value = !tocCollapsed.value
+  try {
+    localStorage.setItem(TOC_COLLAPSED_KEY, tocCollapsed.value ? '1' : '0')
+  } catch { /* 隐私模式下写不进去，忽略即可 */ }
+}
+onMounted(() => {
+  try { tocCollapsed.value = localStorage.getItem(TOC_COLLAPSED_KEY) === '1' } catch { /* 忽略 */ }
+})
+
+/**
+ * 阅读数：页面 HTML 会被 nitro routeRules 缓存，同一 URL 在缓存窗口内只渲染一次，
+ * 所以「服务端渲染那次请求」后端不计阅读数（前端 SSR 请求会带 X-Blog-Client: ssr）。
+ * 真正的打点在浏览器侧：每次打开/跳转到文章都 POST 一次，缓存命中也不会漏记，
+ * 顺手把后端返回的最新值写回展示位，省一次刷新。
+ */
+const viewCountLive = ref<number>(props.article?.viewCount ?? 0)
+watch(() => props.article?.viewCount, (v) => { viewCountLive.value = v ?? 0 })
+watch(articleId, async (id) => {
+  if (!process.client || !id) return
+  try {
+    const res = await post<any>(`/article/${id}/view`)
+    if (res?.code === 200 && typeof res.data === 'number') viewCountLive.value = res.data
+  } catch { /* 打点失败不影响阅读本身 */ }
+}, { immediate: true })
 
 /** AI 总结本文：取全文（截断过长），走自由问答 */
 const aiSummaryLoading = ref(false)
@@ -321,13 +399,66 @@ async function submitComment() {
   commentError.value = ''
   try {
     const { post } = useApi()
-    await post('/comment', { articleId: Number(articleId.value), content: commentText.value })
+    const res = await post<any>('/comment', { articleId: Number(articleId.value), content: commentText.value })
+    if (res.code !== 200) {
+      // 限流 / 超长等业务失败是 HTTP 200，不判 code 会把「失败」当成功清空输入框
+      commentError.value = res.message || '评论失败'
+      return
+    }
     commentText.value = ''
     await refreshComments()
   } catch (e: any) {
     commentError.value = e.message || '评论失败'
   } finally {
     commentSubmitting.value = false
+  }
+}
+
+/* ---- 举报 ---- */
+const { toast } = useFeedback()
+const reportTarget = ref<any>(null)
+const reportReason = ref('垃圾广告')
+const reportReasons = ['垃圾广告', '辱骂攻击', '违法违规', '其他']
+const reportSubmitting = ref(false)
+
+function canReport(c: any) {
+  // 自己的评论没有举报入口；未登录仍显示，点了给提示
+  return !authStore.user || c.userId !== authStore.user.userId
+}
+
+function openReport(c: any) {
+  if (!authStore.isLoggedIn) {
+    toast('登录后才能举报', 'info')
+    return
+  }
+  reportTarget.value = c
+  reportReason.value = '垃圾广告'
+}
+
+function closeReport() {
+  reportTarget.value = null
+}
+
+async function submitReport() {
+  if (!reportTarget.value || reportSubmitting.value) return
+  reportSubmitting.value = true
+  try {
+    const { post } = useApi()
+    const res = await post<any>('/comment/report', {
+      commentId: reportTarget.value.id,
+      reason: reportReason.value
+    })
+    // 业务失败是 HTTP 200 + code != 200，必须自己判
+    if (res.code !== 200) {
+      toast(res.message || '举报失败', 'error')
+      return
+    }
+    toast('已提交举报，感谢反馈', 'success')
+    closeReport()
+  } catch (e: any) {
+    toast(e.message || '举报失败', 'error')
+  } finally {
+    reportSubmitting.value = false
   }
 }
 
