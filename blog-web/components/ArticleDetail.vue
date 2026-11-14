@@ -216,16 +216,32 @@
       </div>
     </Teleport>
 
-    <!-- 选中文本：AI 解释工具条（Teleport 放在根节点内，保证页面单根，避免过渡卡死） -->
+    <!-- 选中文本：解释 / 联网搜索（Teleport 放在根节点内，保证页面单根，避免过渡卡死） -->
     <Teleport to="body">
       <Transition name="sel-pop">
-        <button v-if="selBox && authStore.isLoggedIn" @click="explainSelection" :disabled="explainLoading"
-          class="fixed z-[75] px-3 py-1.5 rounded-full bg-gray-900 dark:bg-gray-700 text-white text-xs shadow-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition flex items-center gap-1.5 -translate-x-1/2 -translate-y-full -mt-2"
+        <div v-if="selBox && authStore.isLoggedIn"
+          class="fixed z-[75] flex items-stretch rounded-full bg-gray-900 dark:bg-gray-700 text-white text-xs shadow-lg whitespace-nowrap overflow-hidden -translate-x-1/2 -translate-y-full -mt-2"
           :style="{ left: selPos.x + 'px', top: selPos.y + 'px' }">
-          <svg v-if="explainLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
-          <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
-          {{ explainLoading ? '分析中...' : 'AI 解释这段' }}
-        </button>
+          <!-- 解释：纯模型解释，不联网、不外发 -->
+          <button @click="explainSelection" :disabled="explainLoading"
+            class="px-3 py-1.5 flex items-center gap-1.5 hover:bg-gray-800 dark:hover:bg-gray-600 transition disabled:opacity-60"
+            title="用 AI 解释这段内容（不联网）">
+            <svg v-if="explainLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+            <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
+            {{ explainLoading ? '分析中...' : '解释这段' }}
+          </button>
+          <span class="w-px bg-white/20 my-1.5"></span>
+          <!-- 搜一下：会联网，选中内容的关键词会发往第三方搜索服务。
+               ↗ 图标就是给用户的信号：这次回答会用到站外内容（见隐私政策「AI 助手」一节） -->
+          <button @click="searchSelection"
+            class="px-3 py-1.5 flex items-center gap-1.5 hover:bg-gray-800 dark:hover:bg-gray-600 transition"
+            title="联网查证这段内容：会把关键词发往第三方搜索服务">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 17L17 7M17 7H9M17 7v8"/>
+            </svg>
+            搜一下
+          </button>
+        </div>
       </Transition>
     </Teleport>
   </div>
@@ -298,7 +314,16 @@ watch(articleId, async (id) => {
   } catch { /* 打点失败不影响阅读本身 */ }
 }, { immediate: true })
 
-/** AI 总结本文：取全文（截断过长），走自由问答 */
+/**
+ * 「AI 总结本文」送进模型的正文上限。
+ *
+ * ⚠️ 这是前后端契约：必须小于 RAG `FreeChatRequest.max_length`（20000）。
+ * 这里曾写死 18000 而对方只收 6000 —— 于是**所有超过 6000 字的文章点总结必 422**，
+ * 前端拿到的只是一句"请求失败"，用户完全不知道是字数问题。
+ */
+const MAX_SUMMARY_CHARS = 18000
+
+/** AI 总结本文：取全文（过长则节选，并明确告知模型这是节选） */
 const aiSummaryLoading = ref(false)
 async function aiSummarize() {
   const md = props.article?.contentMd || ''
@@ -306,9 +331,15 @@ async function aiSummarize() {
   aiSummaryLoading.value = true
   try {
     aiChat.openPanel()
-    const content = md.length > 18000 ? md.slice(0, 18000) : md
+    const clipped = md.length > MAX_SUMMARY_CHARS
+    const content = clipped ? md.slice(0, MAX_SUMMARY_CHARS) : md
+    // 截断时不吭声，模型会照着前半篇写"全文总结"，读者以为读完了全篇 ——
+    // 所以既告诉模型，也要求它在开头写明，读者才知道看到的是节选。
+    const hint = clipped
+      ? `（原文共 ${md.length} 字，以下仅为前 ${MAX_SUMMARY_CHARS} 字节选，请在总结开头注明「本次仅基于前 ${MAX_SUMMARY_CHARS} 字」）\n\n`
+      : ''
     await aiChat.freeAsk(
-      `请用 Markdown 总结下面这篇博客文章，输出：\n## 核心内容\n## 主要知识点\n## 适合人群\n## 学习重点\n\n文章标题：${props.article?.title || ''}\n\n文章内容：\n${content}`
+      `请用 Markdown 总结下面这篇博客文章，输出：\n## 核心内容\n## 主要知识点\n## 适合人群\n## 学习重点\n\n文章标题：${props.article?.title || ''}\n\n${hint}文章内容：\n${content}`
     )
   } finally {
     aiSummaryLoading.value = false
@@ -357,6 +388,30 @@ async function explainSelection() {
   } finally {
     explainLoading.value = false
   }
+}
+
+/**
+ * 划词「搜一下」：走 Agent 问答（会联网），并带上 article_id 让站内检索优先。
+ *
+ * 与「解释这段」的本质区别：这条会把选中内容的关键词发往第三方搜索服务。
+ * 所以入口上有 ↗ 标记，点之前用户就该知道会发生什么。
+ *
+ * ⚠️ 选段要截：联网检索靠的是**关键词**，几千字的整段只会稀释检索词；
+ * 而且超长提问会撞上 `/agent/chat` 的长度上限（8000），旧限是 2000，
+ * 选一段 3000 字点「搜一下」直接 422 —— 用户完全看不出是字数问题。
+ */
+const MAX_SEARCH_SELECTION = 1500
+async function searchSelection() {
+  const text = selText.value
+  selBox.value = false
+  if (!text) return
+  const clipped = text.length > MAX_SEARCH_SELECTION
+  const body = clipped ? text.slice(0, MAX_SEARCH_SELECTION) : text
+  aiChat.openPanel()
+  await aiChat.ask(
+    `请联网查证并解释：${body}${clipped ? `（原文较长，以上为前 ${MAX_SEARCH_SELECTION} 字节选）` : ''}`,
+    articleId.value
+  )
 }
 
 /* ---- 分享 ---- */

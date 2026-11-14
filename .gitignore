@@ -61,3 +61,16 @@ blog-web/web-output.tar.gz
 # 前端构建产物的临时打包（8MB+，只用于 scp 上传，不入库）
 blog-web/web.tar.gz
 blog-web/web-*.tar.gz
+
+# 本地部署中转包（打给服务器手动执行用的 tgz / jar / 源码副本，不入库）
+# 否则一次 `git add -A` 会把 70M+ 的二进制推进仓库。
+_deploy/
+
+# Python 缓存（rag_system 各子目录都会生成，之前只忽略了 deploy/ 下的）
+__pycache__/
+*.py[cod]
+
+# 仓库根目录的临时截图（调试时粘贴保存的，不属于项目资源）
+/*.png
+/*.jpg
+/*.jpeg

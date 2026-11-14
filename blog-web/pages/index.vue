@@ -5,19 +5,22 @@
       <div class="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-paper px-6 sm:px-10 py-8 relative overflow-hidden">
         <div class="relative grid gap-6 lg:gap-8 lg:grid-cols-[1.5fr_1fr_1.1fr] lg:items-center">
           <!-- 左：问候 + 关注方向 + 行动按钮
-               文案来自后台「站点设置」（博主名称/简介/头像），取不到就回落到默认值，
-               所以后台没配也不会出现空白横幅。 -->
+               文案来自后台「站点设置」（博主名称/简介/关注方向），取不到就回落到默认值，
+               所以后台没配也不会出现空白横幅。
+               头像固定用站点 Logo —— 全站只有一个「作者形象」，不再有
+               「首页是站点头像、侧栏是登录用户头像」这种两套来源打架的情况。 -->
           <div class="min-w-0">
             <div class="flex items-center gap-2.5">
-              <img v-if="bloggerAvatar" :src="ossImage(bloggerAvatar, { w: IMG_W.avatar })" :alt="bloggerName"
-                loading="lazy" decoding="async" class="w-10 h-10 rounded-full object-cover ring-1 ring-gray-200 dark:ring-gray-600 shrink-0" />
+              <img src="/logo.svg" alt="" width="40" height="40" decoding="async"
+                class="w-10 h-10 rounded-xl object-contain p-1 ring-1 ring-gray-300/70 dark:ring-gray-600 shrink-0"
+                style="background: var(--page-bg, #F7F2E8)" />
               <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-gray-100 truncate">你好，我是{{ bloggerName }} 👋</h1>
             </div>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1.5">{{ heroSubtitle }}</p>
-            <div class="mt-3">
+            <div v-if="focusTags.length" class="mt-3">
               <div class="text-[11px] font-bold text-gray-400 mb-1.5 tracking-wide">关注方向</div>
               <div class="flex flex-wrap items-center gap-2">
-                <span v-for="t in ['Java', 'AI', 'Python', 'Linux', 'Docker']" :key="t" class="text-xs px-2.5 py-1 rounded-full theme-chip">{{ t }}</span>
+                <span v-for="t in focusTags" :key="t" class="text-xs px-2.5 py-1 rounded-full theme-chip">{{ t }}</span>
               </div>
             </div>
             <div class="flex gap-3 mt-4">
@@ -56,11 +59,12 @@
     <div id="articles" class="flex gap-6 py-6">
       <!-- Left sidebar: category nav -->
       <aside class="hidden lg:block w-52 flex-shrink-0">
-        <div class="sticky top-20 bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
-          <div class="px-4 py-3 border-b dark:border-gray-700 flex items-center justify-between">
-            <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">文章分类</h3>
-          </div>
-          <div class="py-1 max-h-[75vh] overflow-y-auto">
+        <div class="sticky top-20 space-y-4">
+          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b dark:border-gray-700 flex items-center justify-between">
+              <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">文章分类</h3>
+            </div>
+            <div class="py-1 max-h-[46vh] overflow-y-auto">
             <!-- 全部 -->
             <button @click="currentCategory = undefined; pageNum = 1"
               :class="!currentCategory
@@ -100,7 +104,13 @@
                 </div>
               </div>
             </template>
+            </div>
           </div>
+
+          <!-- 发布热力图：分类下方的「我什么时候写过东西」。
+               放在左栏而不是右栏，是因为它属于「导航/概览」性质，
+               和分类树一起构成「我从哪儿进文章」的入口。 -->
+          <ContributionCalendar />
         </div>
       </aside>
 
@@ -182,35 +192,8 @@
 
         <Pagination v-if="totalPages > 1" :current="pageNum" :total="totalPages" @change="pageNum = $event" />
 
-        <!-- 右侧栏在 xl 以下会被隐藏：这里补一个可折叠的替代入口，避免窄屏完全看不到热门内容 -->
+        <!-- 右侧栏在 xl 以下会被隐藏：这里补一个源码入口，避免窄屏完全看不到 -->
         <div class="xl:hidden mt-8">
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
-            <button @click="mobileAsideOpen = !mobileAsideOpen"
-              class="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-              <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门内容</h3>
-              <svg class="w-4 h-4 text-gray-400 transition-transform duration-200" :class="mobileAsideOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-            </button>
-            <div v-show="mobileAsideOpen" class="px-4 pb-4">
-              <!-- 热门文章 -->
-              <div v-if="hotArticles.length" class="space-y-1 mb-3">
-                <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="articlePath(a)"
-                  class="flex items-start gap-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
-                  <span :class="i < 3 ? 'text-primary-600' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
-                  <span class="flex-1 min-w-0 text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug">{{ a.title }}</span>
-                </NuxtLink>
-              </div>
-              <!-- 热门标签 -->
-              <div v-if="hotTags.length" class="flex flex-wrap gap-1.5 pt-3 border-t dark:border-gray-700">
-                <NuxtLink v-for="t in hotTags" :key="t.id" :to="taxonomyPath('/tag', t)"
-                  class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 hover:text-primary-600 dark:hover:text-primary-400 transition">
-                  {{ t.name }}
-                  <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
-                </NuxtLink>
-              </div>
-            </div>
-          </div>
-
-          <!-- 窄屏同样给一个源码入口（右侧栏在 xl 以下是隐藏的） -->
           <a href="https://github.com/WeHoBo/blog" target="_blank" rel="noopener noreferrer"
             class="mt-3 flex items-start gap-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 hover:shadow-md transition group">
             <span class="w-8 h-8 flex-shrink-0 rounded-full bg-gray-900 dark:bg-gray-100 flex items-center justify-center text-white dark:text-gray-900">
@@ -229,24 +212,41 @@
       <!-- Right sidebar -->
       <aside class="hidden xl:block w-60 flex-shrink-0 space-y-4">
         <div class="sticky top-20">
-          <!-- Author profile card -->
+          <!-- 作者卡片：登录显示「我」，未登录显示站点博主。两套内容互不回落 ——
+               否则普通用户没填简介时会看到管理员那份（这个坑踩过两次）。 -->
           <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden mb-4">
             <div class="p-4 text-center">
-              <template v-if="authStore.isLoggedIn && authStore.user">
-                <img v-if="authStore.user.avatar" :src="ossImage(authStore.user.avatar, { w: IMG_W.avatar })" :alt="authStore.user.nickname"
-                  class="w-16 h-16 mx-auto rounded-full object-cover mb-3" />
-                <div v-else class="w-16 h-16 mx-auto rounded-full bg-primary-600 flex items-center justify-center text-white font-bold text-xl mb-3">
-                  {{ authStore.user.nickname?.[0] || authStore.user.username?.[0] || 'B' }}
-                </div>
-                <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">{{ authStore.user.nickname || authStore.user.username }}</div>
-                <p class="text-xs text-gray-500 mt-1 leading-relaxed">📝 记录技术成长<br>💻 分享编程心得</p>
-                <NuxtLink to="/profile" class="inline-block mt-2 text-xs text-primary-600 dark:text-primary-400 hover:underline">个人主页 →</NuxtLink>
+              <!-- ① 登录用户：自己的资料 -->
+              <template v-if="showMine">
+                <template v-if="me">
+                  <img v-if="myAvatar" :src="myAvatar" alt="" width="64" height="64" decoding="async"
+                    class="w-16 h-16 mx-auto mb-3 rounded-full object-cover ring-1 ring-gray-300/70 dark:ring-gray-600" />
+                  <div v-else
+                    class="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center text-xl font-bold text-white bg-primary-600 dark:bg-primary-500">
+                    {{ myInitial }}
+                  </div>
+                  <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">{{ myName }}</div>
+                  <p v-if="myBio" class="text-xs text-gray-500 mt-1 leading-relaxed whitespace-pre-line">{{ myBio }}</p>
+                  <NuxtLink v-else to="/profile" class="block text-xs text-gray-400 mt-1 hover:text-primary-500 transition">还没写简介，去补一句 →</NuxtLink>
+                  <NuxtLink to="/profile" class="inline-block mt-2 text-xs text-primary-600 dark:text-primary-400 hover:underline">编辑我的资料 →</NuxtLink>
+                </template>
+                <!-- 已登录但资料还没取到：占位骨架，绝不显示博主的 -->
+                <template v-else>
+                  <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                  <div class="h-3 w-24 mx-auto rounded bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                  <div class="h-3 w-full mt-2 rounded bg-gray-100 dark:bg-gray-700/60 animate-pulse"></div>
+                  <NuxtLink to="/profile" class="inline-block mt-2 text-xs text-primary-600 dark:text-primary-400 hover:underline">编辑我的资料 →</NuxtLink>
+                </template>
               </template>
+
+              <!-- ② 访客：站点博主（公开信息，SSR 直出） -->
               <template v-else>
-                <div class="w-16 h-16 mx-auto rounded-full bg-primary-600 flex items-center justify-center text-white text-2xl mb-3">👤</div>
-                <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">未登录</div>
-                <p class="text-xs text-gray-500 mt-1 leading-relaxed">登录后查看更多功能</p>
-                <NuxtLink to="/login" class="inline-block mt-2 px-3 py-1 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs hover:opacity-85 transition">立即登录</NuxtLink>
+                <img src="/logo.svg" alt="" width="64" height="64" decoding="async"
+                  class="w-16 h-16 mx-auto mb-3 rounded-2xl object-contain p-2 ring-1 ring-gray-300/70 dark:ring-gray-600"
+                  style="background: var(--page-bg, #F7F2E8)" />
+                <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">{{ bloggerName }}</div>
+                <p class="text-xs text-gray-500 mt-1 leading-relaxed whitespace-pre-line">{{ bloggerBio || '记录技术成长，分享编程心得' }}</p>
+                <NuxtLink to="/about" class="inline-block mt-2 text-xs text-primary-600 dark:text-primary-400 hover:underline">关于我 →</NuxtLink>
               </template>
             </div>
           </div>
@@ -273,35 +273,9 @@
             </span>
           </a>
 
-          <!-- Hot articles -->
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
-            <div class="px-4 py-3 border-b dark:border-gray-700">
-              <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门文章</h3>
-            </div>
-            <div class="p-3 space-y-1">
-              <NuxtLink v-for="(a, i) in hotArticles" :key="a.id" :to="articlePath(a)" class="flex items-start gap-2 py-2 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm">
-                <span :class="i < 3 ? 'text-primary-600' : 'text-gray-400'" class="font-bold text-xs w-5 flex-shrink-0">{{ String(i + 1).padStart(2, '0') }}</span>
-                <span class="flex-1 min-w-0">
-                  <span class="text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug hover:text-primary-600 dark:hover:text-primary-400 transition">{{ a.title }}</span>
-                  <span v-if="a.categoryName" class="block text-xs opacity-50 mt-0.5">{{ a.categoryName }}</span>
-                </span>
-              </NuxtLink>
-            </div>
-          </div>
-
-          <!-- Tags -->
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
-            <div class="px-4 py-3 border-b dark:border-gray-700">
-              <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">热门标签</h3>
-            </div>
-            <div class="p-3 flex flex-wrap gap-1.5">
-              <NuxtLink v-for="t in hotTags" :key="t.id" :to="taxonomyPath('/tag', t)"
-                class="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 hover:text-primary-600 dark:hover:text-primary-400 transition">
-                {{ t.name }}
-                <span v-if="t.articleCount" class="text-[10px] opacity-50">{{ t.articleCount }}</span>
-              </NuxtLink>
-            </div>
-          </div>
+          <!-- 热门文章 / 热门标签两块已按需求移除：
+               热门榜只有 5 条、且和「按时间排序的文章流」高度重合，
+               占掉右栏 1/3 的高度却不带来新的信息（阅读量还会被缓存窗口拉平）。 -->
         </div>
       </aside>
     </div>
@@ -351,14 +325,10 @@
 // 标签改跳独立落地页 /tag/{slug}，而不是回退到首页的 ?tagId= 过滤
 // （聚合页此前没有独立 URL，等于把 SEO 权重都让给了首页）
 import { taxonomyPath } from '~/utils/taxonomy'
-import { ossImage, IMG_W } from '~/utils/image'
-// 文章链接统一走 articlePath()，避免 /post/{slug} 与 /article/{id} 混用
-import { articlePath } from '~/utils/articlePath'
 
 const { get } = useApi()
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 
 const pageNum = ref(1)
 const keyword = ref((route.query.keyword as string) || '')
@@ -368,18 +338,18 @@ const articles = ref<any[]>([])
 const categoryTree = ref<any[]>([])
 const categoryList = ref<any[]>([])
 const tags = ref<any[]>([])
-const hotArticles = ref<any[]>([])
 const totalPages = ref(0)
 const totalArticles = ref(0)
 /** 当前筛选条件下的命中总数（搜索时用来告诉用户「找到了多少篇」） */
 const totalMatched = ref(0)
 const loading = ref(true)
 const mobileCatOpen = ref(false)
-// 窄屏「热门内容」折叠面板的开关（此前模板引用了但未声明，
-// 导致点击无效、Vue 每次渲染都告警）
-const mobileAsideOpen = ref(false)
 
 const { viewMode, setViewMode, sortMode } = useLayout()
+
+/* 右栏作者卡片要显示「当前这个登录用户自己」的头像/昵称/简介（用户在个人中心自己填）。
+   没登录时回落到站点设置里的博主信息 —— 那是站点广播，访客看同一份。 */
+const authStore = useAuthStore()
 
 /* ---------------------------------------------------------------
    横幅文案（Banner Title）
@@ -390,8 +360,15 @@ const { viewMode, setViewMode, sortMode } = useLayout()
    --------------------------------------------------------------- */
 const { data: siteCfg } = await useSiteConfig()
 
-const bloggerName = computed(() => (siteCfg.value?.bloggerName || '').trim() || '好啵')
-const bloggerAvatar = computed(() => (siteCfg.value?.bloggerAvatar || '').trim())
+const bloggerName = computed(() => (siteCfg.value?.bloggerName || '').trim() || '博观')
+/** 侧栏作者卡片用完整简介（可能多行），横幅只用第一行 */
+const bloggerBio = computed(() => (siteCfg.value?.bloggerBio || '').trim())
+/** 「关注方向」小胶囊：后台填英文逗号分隔，最多 6 个 */
+const focusTags = computed(() => {
+  const raw = (siteCfg.value?.bloggerFocus || '').trim()
+  if (!raw) return ['Java', 'AI', 'Python', 'Linux', 'Docker']
+  return [...new Set(raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean))].slice(0, 6)
+})
 const heroSubtitle = computed(() => {
   // 简介允许分多行（常见写法是「📝 记录技术成长 / 💻 分享编程心得」），
   // 横幅只要第一行：多了会把卡片撑高，和右侧标签栏对不齐。
@@ -399,6 +376,56 @@ const heroSubtitle = computed(() => {
     .split('\n').map((s) => s.trim()).find(Boolean) || ''
   return bio || (siteCfg.value?.siteDesc || '').trim() || '记录我的计算机学习与技术实践'
 })
+
+/* ---------------------------------------------------------------
+   右栏「作者卡片」有两套内容，**绝不能互相回落**：
+
+   - 访客（未登录）→ 站点博主的公开信息（站点广播，SSR 直出，对 SEO 也友好）
+   - 登录用户      → 严格显示他自己的头像/昵称/简介
+
+   ⚠️⚠️ 上次的错误：给登录用户也写了「取不到就回落到 bloggerName / bloggerBio」。
+   结果普通用户没填简介时，卡片上显示的是**管理员写的简介和昵称**，
+   看起来就像「所有人共用同一个作者」。这里把回落彻底去掉：
+   没填就显示占位文案，没传头像就显示昵称首字母，绝不借用别人的。
+
+   ⚠️ 为什么宁可在服务端多问一次 `/auth/me`：
+   `authStore.user` 存在 localStorage，SSR 读不到，直接渲染会「服务端吐 A、水合后变 B」。
+   用 cookie 里的 token 在服务端取一次，值进 payload，首屏就是对的。
+   --------------------------------------------------------------- */
+const { data: viewer } = await useAsyncData('home-viewer', async () => {
+  if (!authStore.isLoggedIn) return null
+  try {
+    const res = await get<any>('/auth/me')
+    return res?.code === 200 ? res.data : null
+  } catch {
+    // token 过期/后端异常都按「没取到」处理，不要因此让首页 500
+    return null
+  }
+})
+
+/** 是否走「我的资料」这套 UI。用 cookie 判断，SSR 与客户端结果一致，不会水合打架 */
+const showMine = computed(() => authStore.isLoggedIn)
+
+/* 服务端那次 `/auth/me` 可能失败（最常见是 token 过期，而 localStorage 里还留着用户信息，
+   于是顶栏看起来是登录状态、右栏却取不到人）。这时退到浏览器缓存里的用户，
+   保证「头像昵称至少是自己」，绝不再回落到站点广播。
+   ⚠️ 只能在 onMounted 之后读 `authStore.user`：SSR 没有 localStorage，
+   在 computed 里直接读会导致「服务端 null / 客户端有值」的水合不一致。 */
+const clientUser = ref<any>(null)
+onMounted(() => {
+  if (!viewer.value && authStore.user) clientUser.value = authStore.user
+})
+const me = computed(() => viewer.value || clientUser.value || null)
+
+const myAvatar = computed(() => (me.value?.avatar || '').trim())
+const myName = computed(() => {
+  const v = me.value
+  return ((v?.nickname || v?.username || '').trim()) || '我'
+})
+/** 首字母占位头像：没传头像时用它，而不是退回站点 Logo（那会让人误以为是站点图） */
+const myInitial = computed(() => (myName.value || '?').slice(0, 1).toUpperCase())
+/** 简介只用自己的。空就是空 —— 模板里显示占位提示，不借站点广播的文案 */
+const myBio = computed(() => (me.value?.bio || '').trim())
 
 const pageTitle = computed(() => {
   if (keyword.value) return `搜索：${keyword.value}`
@@ -530,23 +557,22 @@ async function fetchArticles() {
 // 首屏数据在服务端取好：Nuxt payload 会把它序列化给客户端，hydration 时不再重复请求；
 // 同时爬虫/用户拿到的首屏 HTML 里就带有文章列表（此前 init() 是「发射后不管」，首屏只有骨架屏 + 客户端请求两次）。
 const { data: homeInit } = await useAsyncData('home-init', async () => {
-  const [catRes, tagRes, hotRes, art] = await Promise.all([
+  const [catRes, tagRes, totalRes, art] = await Promise.all([
     get<any>('/category/list').catch(() => null),
     get<any>('/article/tags').catch(() => null),
-    get<any>('/article/list?pageSize=5').catch(() => null),
+    // 只要总数给 Hero 的「站点概览」用：pageSize=1 即可，
+    // 之前拉 5 条是为了做「热门文章」榜，榜单已移除，没必要再多传 5 篇的字段。
+    get<any>('/article/list?pageSize=1').catch(() => null),
     loadArticles().catch(() => ({ records: [], pages: 0, total: 0 }))
   ])
   const categories: any[] = catRes?.code === 200 ? (catRes.data || []) : []
-  const hot: any[] = hotRes?.code === 200 ? (hotRes.data?.records || []) : []
   return {
     categories,
     tags: tagRes?.code === 200 ? (tagRes.data || []) : [],
-    hotArticles: [...hot].sort((a: any, b: any) => b.viewCount - a.viewCount).slice(0, 5),
     articles: art.records,
     totalPages: art.pages,
     totalMatched: art.total,
-    // 文章总数给 Hero 的「站点概览」用；顺手复用已经发出的 hot 请求，不额外增加接口调用
-    totalArticles: hotRes?.code === 200 ? (hotRes.data?.total || 0) : 0
+    totalArticles: totalRes?.code === 200 ? (totalRes.data?.total || 0) : 0
   }
 })
 
@@ -556,7 +582,6 @@ if (homeInit.value) {
   categoryList.value = d.categories
   categoryTree.value = buildCategoryTree(d.categories)
   tags.value = d.tags
-  hotArticles.value = d.hotArticles
   articles.value = d.articles
   totalPages.value = d.totalPages
   totalMatched.value = d.totalMatched || 0
@@ -582,7 +607,7 @@ watch(() => route.query.tagId, (val) => {
 })
 
 // 站点名 / 描述也走后台「站点设置」：填了就用，没填回落到原有文案（SEO 不能因为漏配而变空）
-const siteName = computed(() => (siteCfg.value?.siteName || '').trim() || '好啵博客')
+const siteName = computed(() => (siteCfg.value?.siteName || '').trim() || '博观')
 const siteDesc = computed(() => (siteCfg.value?.siteDesc || '').trim()
   || '一个程序员的个人技术博客：记录 Java / SpringBoot / Vue / Nuxt / Python / Linux / Docker 等技术思考、编程心得与学习笔记。')
 

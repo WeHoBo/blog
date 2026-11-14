@@ -34,7 +34,7 @@ public class SiteConfigController {
         for (SiteConfig c : list) {
             map.put(c.getConfigKey(), c.getConfigValue());
         }
-        if (!map.containsKey("siteName")) map.put("siteName", "好啵博客");
+        if (!map.containsKey("siteName")) map.put("siteName", "博观");
         if (!map.containsKey("siteDesc")) map.put("siteDesc", "一个程序员的个人技术博客");
         if (!map.containsKey("aboutContent")) map.put("aboutContent", "");
         return Result.ok(map);

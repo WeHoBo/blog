@@ -4,13 +4,14 @@
     :class="hidden ? '-translate-y-full' : 'translate-y-0'"
   >
     <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
-      <!-- Logo -->
-      <NuxtLink to="/" class="flex items-center gap-2 flex-shrink-0 mr-2 group" style="perspective:600px">
-        <div class="relative w-9 h-9 transition-transform duration-500" style="transform-style:preserve-3d" :class="{'rotate-y-180': logoFlipped}" @mouseenter="logoFlipped = true" @mouseleave="logoFlipped = false">
-          <div class="absolute inset-0 flex items-center justify-center rounded-lg bg-primary-600 text-white font-bold text-sm" style="backface-visibility:hidden">B</div>
-          <div class="absolute inset-0 flex items-center justify-center rounded-lg bg-primary-600 text-white font-bold text-sm" style="backface-visibility:hidden;transform:rotateY(180deg)">&lt;/&gt;</div>
-        </div>
-        <span class="font-extrabold text-gray-900 dark:text-white tracking-tight text-lg sm:text-xl">好啵博客</span>
+      <!-- Brand：logo（矢量，24px 下笔画也清楚）+ 字标。
+           原来的「B ↔ </> 3D 翻转」是个纯装饰的假 logo，和站点气质不搭，
+           换成真实的站点标识后，浏览器标签页、分享卡、顶栏三处是同一个图形。 -->
+      <NuxtLink to="/" class="flex items-center gap-2.5 flex-shrink-0 mr-2 group" aria-label="博观 首页">
+        <img src="/logo.svg" alt="" width="36" height="36" decoding="async"
+          class="w-9 h-9 rounded-[10px] object-contain p-1 ring-1 ring-gray-300/70 dark:ring-gray-600 group-hover:ring-primary-400 transition-colors"
+          style="background: var(--page-bg, #F7F2E8)" />
+        <span class="font-extrabold text-gray-900 dark:text-white tracking-tight text-lg sm:text-xl">博观</span>
       </NuxtLink>
 
       <!-- Desktop Nav -->
@@ -264,7 +265,6 @@ const searchWrap = ref<HTMLElement | null>(null)
 const historyOpen = ref(false)
 const activeIndex = ref(-1)
 const mobileOpen = ref(false)
-const logoFlipped = ref(false)
 const settingsOpen = ref(false)
 const userOpen = ref(false)
 

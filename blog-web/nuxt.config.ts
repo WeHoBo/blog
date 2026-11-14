@@ -77,22 +77,25 @@ export default defineNuxtConfig({
 
   app: {
     head: {
-      title: '好啵博客 - codeup.asia',
+      title: '博观 - codeup.asia',
       charset: 'utf-8',
       viewport: 'width=device-width, initial-scale=1',
       link: [
+        // svg 优先（缩放不糊），png 是给不认 svg 图标的旧浏览器的退路
+        { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' },
         { rel: 'icon', type: 'image/png', href: '/favicon-32.png', sizes: '32x32' },
         { rel: 'icon', type: 'image/png', href: '/favicon-16.png', sizes: '16x16' },
         { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }
       ],
       meta: [
-        { name: 'description', content: '一个程序员的个人技术博客 - codeup.asia' },
-        { name: 'keywords', content: '技术博客,编程,Java,SpringBoot,Vue,codeup' },
-        { property: 'og:title', content: '好啵博客 - codeup.asia' },
-        { property: 'og:description', content: '一个程序员的个人技术博客' },
+        { name: 'description', content: '博观 - 一个程序员的技术博客，记录 Java / SpringBoot / Vue / Nuxt / Python / Linux / Docker 的实践与思考' },
+        { name: 'keywords', content: '博观,技术博客,编程,Java,SpringBoot,Vue,codeup' },
+        { property: 'og:title', content: '博观 - codeup.asia' },
+        { property: 'og:description', content: '博观 - 一个程序员的技术博客' },
         { property: 'og:url', content: 'https://codeup.asia' },
         { property: 'og:type', content: 'website' },
-        { property: 'og:site_name', content: '好啵博客' }
+        { property: 'og:site_name', content: '博观' },
+        { property: 'og:image', content: 'https://codeup.asia/logo.png' }
       ],
       // 壁纸模式存在 localStorage，服务端读不到。这段内联脚本在首次绘制前就把模式
       // 写进 <html data-wallpaper>，CSS 据此决定壁纸几何与正文上边距 ——

@@ -10,7 +10,7 @@
             <div class="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center text-lg font-bold">
               H
             </div>
-            <NuxtLink to="/" class="text-2xl font-bold tracking-tight">好啵博客</NuxtLink>
+            <NuxtLink to="/" class="text-2xl font-bold tracking-tight">博观</NuxtLink>
           </div>
           <div class="space-y-6">
             <h1 class="text-4xl font-bold leading-tight">欢迎回来</h1>
@@ -34,7 +34,7 @@
           </div>
         </div>
         <div class="relative z-10 text-sm text-primary-200/70">
-          &copy; {{ new Date().getFullYear() }} 好啵博客 &mdash; 用心记录每一行代码
+          &copy; {{ new Date().getFullYear() }} 博观 &mdash; 用心记录每一行代码
         </div>
       </div>
 

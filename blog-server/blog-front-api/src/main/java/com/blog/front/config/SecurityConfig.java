@@ -43,6 +43,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/oauth/**").permitAll()
                 .requestMatchers("/uploads/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/doc.html").permitAll()
+                // RAG 服务没有 JWT，只能用共享令牌：这里放行，由 InternalAiController 自己校验 X-RAG-Token，
+                // 且 Nginx 已对 /internal/ 做 deny all（公网不可达）。两层都不能少。
+                .requestMatchers("/internal/**").permitAll()
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )

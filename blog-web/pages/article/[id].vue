@@ -48,9 +48,9 @@ const canonicalUrl = computed(() =>
 )
 
 useSeoMeta({
-  title: () => (article.value?.title ? `${article.value.title} - 好啵博客` : '文章详情 - 好啵博客'),
-  description: () => article.value?.summary || '好啵博客技术文章',
-  ogTitle: () => article.value?.title || '好啵博客',
+  title: () => (article.value?.title ? `${article.value.title} - 博观` : '文章详情 - 博观'),
+  description: () => article.value?.summary || '博观技术文章',
+  ogTitle: () => article.value?.title || '博观',
   ogDescription: () => article.value?.summary || '一个程序员的个人技术博客',
   ogImage: () => article.value?.cover || `${SITE_URL}/apple-touch-icon.png`,
   ogType: 'article',
@@ -71,7 +71,7 @@ useHead(() => ({
           image: article.value.cover ? [article.value.cover] : undefined,
           datePublished: article.value.createTime || undefined,
           dateModified: article.value.updateTime || article.value.createTime || undefined,
-          author: { '@type': 'Person', name: '好啵' },
+          author: { '@type': 'Person', name: '博观' },
           mainEntityOfPage: canonicalUrl.value
         })
       }]

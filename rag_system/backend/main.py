@@ -14,29 +14,32 @@ main.py - FastAPI 后端入口
        生产环境请在 .env 配置 RAG_API_TOKEN，与 Java 端 ai.rag-token 保持一致。
 """
 import asyncio
+import concurrent.futures
+import json
 import os
 import shutil
+import threading
+import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
-# ChromaDB 需要 sqlite3 >= 3.35.0，旧系统（如 Alibaba Cloud Linux 3）用 pysqlite3-binary 替代
-try:
-    import pysqlite3
-    import sys
-    sys.modules['sqlite3'] = pysqlite3
-except ImportError:
-    pass
+# ChromaDB 需要 sqlite3 >= 3.35.0，旧系统（Alibaba Cloud Linux 3 是 3.26）靠 pysqlite3 顶替。
+# ⚠️ 必须排在最前面 —— 后面 fastapi / uvicorn / chromadb 任何一个先导入都会锁死旧 sqlite3。
+import sqlite_compat  # noqa: F401
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import agent
+import agent_tools
 import config
 import db
 import pdf_parser
+import usage_reporter
 from llm_client import LLMClient
 from vector_store import EmbeddingClient, VectorStore
 
@@ -63,6 +66,8 @@ async def lifespan(_: FastAPI):
     global vector_store, llm
     vector_store = VectorStore(EmbeddingClient())  # 初始化 ChromaDB + Embedding 客户端
     llm = LLMClient()                              # 初始化 DeepSeek 客户端
+    # 工具层复用同一个向量库实例：search_knowledge 在进程内直接查，省一次 HTTP 往返
+    agent_tools.bind_vector_store(vector_store)
     print(f"[启动] 向量库就绪，当前共有 {vector_store.count()} 个文本块")
     if not config.RAG_API_TOKEN:
         print("[启动][警告] 未配置 RAG_API_TOKEN，接口不校验调用令牌（仅建议本机开发使用）")
@@ -87,8 +92,15 @@ app.add_middleware(
 
 
 # ---------------- 请求模型 ----------------
+# ⚠️ 这两个 max_length 是"前后端契约"，改任一处都要同步前端：
+#    - question 上限 8000：输入框限 2000（AiFloat.vue 的 maxlength），
+#      但划词「搜一下」这类**程序拼出来**的提问会带内容（前端截到 1500 字再拼）。
+#      留 8000 是兜底：以前这里是 2000，选一段 3000 字点「搜一下」直接 422 —— 用户毫无头绪。
+#    - free 上限 20000：文章页「AI 总结本文」会送正文，前端截 18000 字（ArticleDetail.vue
+#      的 MAX_SUMMARY_CHARS）。以前这里是 6000，于是**任何超过 6000 字的文章总结必 422**。
+#      20000 而非正好 18000，是给"标题 + 模板前缀"留余量。
 class ChatRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000, description="用户问题")
+    question: str = Field(..., min_length=1, max_length=8000, description="用户问题")
     doc_id: str | None = Field(None, description="限定检索的文档 id，为空则检索全部文档")
     article_id: str | None = Field(None, description="限定检索的博客文章 id，为空则检索全部")
     top_k: int = Field(config.TOP_K, ge=1, le=20, description="检索返回的相关片段数量")
@@ -103,7 +115,7 @@ class ArticleIn(BaseModel):
 
 
 class FreeChatRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=6000, description="用户问题/代码/文章内容")
+    question: str = Field(..., min_length=1, max_length=20000, description="用户问题/代码/文章内容")
     mode: str = Field("explain", description="explain=代码解释/总结；chat=自由对话")
 
 
@@ -156,19 +168,129 @@ def get_documents():
 
 # ---------------- 接口二点五：健康检查 ----------------
 @app.get("/health")
-def health():
-    """健康检查：供 Java/运维确认服务与向量库状态"""
+def health(probe: bool = False):
+    """健康检查：供 Java/运维确认服务、向量库与 **embedding 可用性**
+
+    `?probe=1` 跳过 60 秒缓存、立刻重测一次 embedding（换完 key 验证用）。
+    这里刻意用普通 `bool` 默认值而不是 `Query(...)`：后者在 Python 层面是个对象，
+    单元测试直接调 `health()` 时会被当成真值，把缓存绕过掉。
+    """
     chunks = 0
     try:
         if vector_store is not None:
             chunks = vector_store.count()
     except Exception:
         pass
+    embed = _probe_embedding(force=probe)
+    cfg = llm.current() if llm is not None else {}
     return {
-        "status": "ok",
+        # ok = 服务与检索链路都正常；degraded = 进程活着但语义检索不可用。
+        # 不直接报 ok 的原因：embedding 挂掉时所有检索都会失败，AI 只会答
+        # 「站内没有相关内容」—— 服务"看起来健康"是把故障藏起来，不是健康。
+        "status": "degraded" if embed.get("ok") is False else "ok",
         "chunks": chunks,
+        # 真打一次 embedding 的结果。之前的盲区：chunks 读的是 Chroma 本地元数据，
+        # key 失效（401 / code 30014）时它照样返回 1055，于是全站 AI 静默失效。
+        "embedding": embed,
         "token_required": bool(config.RAG_API_TOKEN),
+        "agent": True,
+        # 当前生效模型来自哪里：registry=后台注册表，env=.env 兜底。
+        # 部署后先看这一项，能立刻判断"后台配的模型到底有没有生效"
+        "model": cfg.get("model"),
+        "modelSource": cfg.get("source"),
+        "supportTools": cfg.get("support_tools"),
+        # 联网搜索是否可用（开关 + 至少一个 provider 有密钥）。
+        # 部署后看这一项就知道"web_search 到底挂上没挂上"，不用等用户提问才发现。
+        "webSearch": _web_search_available(),
     }
+
+
+# ---------------- embedding 可用性探测 ----------------
+
+# /health 可能被监控按分钟拉，真打一次 embedding 是要花钱和耗时的，所以缓存 60 秒。
+_EMBED_PROBE_TTL = 60.0
+# 探测卡住不能把 /health 一起拖死（EmbeddingClient 自身超时是 60s，太长了）
+_EMBED_PROBE_TIMEOUT = 8.0
+_embed_probe: dict[str, Any] = {"ok": None, "error": "", "model": "", "at": 0.0}
+# 上一次探测结果，只用来判断"是否发生翻转"，避免每分钟重复刷同一行日志
+_embed_ok_before: bool | None = None
+_embed_probe_lock = threading.Lock()
+
+
+def _probe_embedding(force: bool = False) -> dict[str, Any]:
+    """真打一次 embedding 接口，确认「向量化」这条路是活的。
+
+    为什么必须真打：`chunks` 读的是 Chroma 的本地元数据，跟 embedding 服务无关。
+    key 失效（401 / code 30014 Token is invalid）时它照样返回 1055，
+    于是 /health 一片绿、后台看不出异常，而所有语义检索都在 500，
+    AI 一律回答「站内没有相关内容」—— 这是本项目真踩过的事故，
+    排查时最费时间的一点就是"健康检查骗了我"。
+
+    返回：{ok, error, model}，ok 为 False 表示检索链路不可用。
+    结果缓存 60s；`?probe=1` 可强制重测（改完 key 立刻验证用）。
+    """
+    global _embed_ok_before
+    now = time.time()
+    with _embed_probe_lock:
+        if (not force and _embed_probe["ok"] is not None
+                and now - _embed_probe["at"] < _EMBED_PROBE_TTL):
+            return {"ok": _embed_probe["ok"], "error": _embed_probe["error"],
+                    "model": _embed_probe["model"]}
+
+        model = getattr(config, "EMBEDDING_MODEL", "") or ""
+        ok: bool | None
+        error = ""
+
+        if vector_store is None:
+            ok, error = False, "向量库未初始化（多为 .env 缺 EMBEDDING_BASE_URL/KEY/MODEL）"
+        else:
+            ok, error = _call_embedding_once()
+
+        if _embed_ok_before is None:
+            if ok:
+                print(f"[Health] embedding 探测通过（{model or '未配置模型'}）")
+            else:
+                print(f"[Health] ⚠️ embedding 不可用（{model or '未配置模型'}）：{error}")
+                print("[Health] ⚠️ 语义检索会全部失败，AI 将无法基于站内内容回答 —— 请检查 EMBEDDING_API_KEY")
+        elif _embed_ok_before is not ok:
+            if ok:
+                print(f"[Health] embedding 已恢复（{model or '未配置模型'}）")
+            else:
+                print(f"[Health] ⚠️ embedding 刚刚失效（{model or '未配置模型'}）：{error}")
+        _embed_ok_before = ok
+
+        _embed_probe.update({"ok": ok, "error": error, "model": model, "at": now})
+        return {"ok": ok, "error": error, "model": model}
+
+
+def _call_embedding_once() -> tuple[bool, str]:
+    """发一条最短的 embedding 请求。成功返回 (True, "")，失败返回 (False, 原因)。
+
+    单独抽出来是为了让探测和"是不是超时"分开处理：超时后线程还在跑（客户端自身
+    60s 超时），这里不 join，避免把 /health 也拖到 60 秒。
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(vector_store.embedding.embed_query, "ping")
+        vector = future.result(timeout=_EMBED_PROBE_TIMEOUT)
+        if not vector:
+            return False, "embedding 返回了空向量"
+        return True, ""
+    except concurrent.futures.TimeoutError:
+        return False, f"embedding 探测超时（>{_EMBED_PROBE_TIMEOUT:.0f}s）"
+    except Exception as e:
+        # 401 会以 AuthenticationError 出现；把类名带上，排查时一眼能认出是 key 问题
+        return False, f"{type(e).__name__}: {e}"
+    finally:
+        executor.shutdown(wait=False)
+
+
+def _web_search_available() -> bool:
+    try:
+        import web_search
+        return web_search.available()
+    except Exception:
+        return False
 
 
 # ---------------- 接口三：博客文章批量入库 ----------------
@@ -201,111 +323,116 @@ async def ingest_articles(articles: list[ArticleIn]):
     return {"message": "入库完成", "articles": len(articles), "chunks": total_chunks, "failed": failed}
 
 
-# ---------------- 接口四：自由问答（非 RAG，代码解释/全文总结用，流式） ----------------
+# ---------------- SSE 工具 ----------------
+async def _sse_stream(events, request: Request):
+    """
+    把 agent 产出的 (event, data) 异步序列包成真正的 SSE 字节流。
+
+    两个必须做的事：
+      1. 心跳：每 15s 发一行 `: ping`。Nginx 默认 60s 空闲就断连，
+         而一次工具调用最长 10s、一轮问答可能几十秒没输出，不心跳会被掐。
+      2. 断连取消：前端点停止后，这里要尽快把后台任务 cancel 掉，
+         否则模型还在吐 token、还在烧钱，用户那边已经什么都不显示了。
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def pump():
+        try:
+            async for item in events:
+                await queue.put(item)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SSE] 生成器异常: {e}")
+            await queue.put(("error", {"code": "INTERNAL", "message": f"服务内部错误：{e}"}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                if await request.is_disconnected():
+                    break
+                yield ": ping\n\n"
+                continue
+            if item is None:
+                break
+            event, data = item
+            yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    finally:
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
+
+
+# ---------------- 接口四：自由问答（代码解释 / 全文总结，SSE） ----------------
 @app.post("/free-chat")
-async def free_chat(req: FreeChatRequest):
-    """自由问答：不检索向量库，直接把用户内容交给 LLM（用于解释选中代码、总结全文）。"""
-    from llm_client import CODE_EXPLAIN_PROMPT
-
-    system_prompt = CODE_EXPLAIN_PROMPT if req.mode == "explain" else (
-        "你是一名友好的技术助手，请用简洁清晰的中文回答。回答使用 Markdown 格式。"
-    )
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": req.question},
-    ]
-
-    async def generate():
-        answer = ""
-        try:
-            async for delta in llm.stream_chat(messages):
-                answer += delta
-                yield delta
-        except Exception as e:
-            print(f"[流式错误][free] {e}")
-            yield "抱歉，AI 服务暂时不可用，请稍后重试。" if not answer else "\n\n> ⚠️ 回答生成中断，请重试。"
-            return
-        await asyncio.to_thread(db.add_chat, f"[free] {req.question[:100]}", answer)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/plain; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+async def free_chat(
+    req: FreeChatRequest,
+    request: Request,
+    x_ai_user_id: str | None = Header(default=None, alias="X-AI-User-Id"),
+    x_ai_model: str | None = Header(default=None, alias="X-AI-Model"),
+):
+    """自由问答：不检索、不调工具，直接把用户内容交给 LLM。仍然走 SSE，前端只需一套解析。"""
+    model_code = usage_reporter.resolve_model_code(x_ai_model)
+    events = agent.run_free(req.question, llm, req.mode,
+                            user_id=x_ai_user_id, model_code=model_code)
+    return StreamingResponse(_sse_stream(_tap_history(events, f"[free] {req.question[:100]}"),
+                                         request),
+                             media_type="text/event-stream; charset=utf-8",
+                             headers=SSE_HEADERS)
 
 
-# ---------------- 接口五：RAG 问答（流式） ----------------
+# ---------------- 接口五：Agent 问答（SSE） ----------------
 @app.post("/chat")
-async def chat(req: ChatRequest):
-    """RAG 问答：向量检索相关资料 -> 组装提示词 -> DeepSeek 流式回答 -> 保存历史"""
-    # 1) 向量检索：对问题生成向量，在 ChromaDB 中召回 top_k 个相关片段
-    contexts = await asyncio.to_thread(
-        vector_store.search, req.question, req.top_k, req.doc_id
-    )
-    if req.article_id:
-        # 只保留属于该文章的结果（向量层无法直接 where 在 query 上过滤，这里二次过滤）
-        contexts = [c for c in contexts if str(c.get("article_id", "")) == str(req.article_id)]
-    # 2) 组装 RAG 提示词
-    messages = llm.build_rag_prompt(req.question, contexts)
+async def chat(
+    req: ChatRequest,
+    request: Request,
+    x_ai_user_id: str | None = Header(default=None, alias="X-AI-User-Id"),
+    x_ai_model: str | None = Header(default=None, alias="X-AI-Model"),
+):
+    """
+    Agent 问答：模型自己决定要不要检索、检索什么，最多 5 轮工具调用。
 
-    async def generate():
-        """流式生成器：边接收 DeepSeek 输出边转发给前端，结束后落库"""
-        # 向量库为空或未召回任何片段时，不再调用大模型，直接提示用户
-        if not contexts:
-            answer = "抱歉，向量库中还没有相关资料。请先上传文档或等待文章导入后再提问。"
-            await asyncio.to_thread(db.add_chat, req.question, answer)
-            yield answer
-            return
+    与旧版的区别：不再"先向量检索再拼提示词"，检索变成了 search_knowledge 工具，
+    由模型按需调用 —— 问"你能做什么"这种问题就不必白跑一次向量库。
+    """
+    model_code = usage_reporter.resolve_model_code(x_ai_model)
+    events = agent.run_chat(req.question, llm,
+                            user_id=x_ai_user_id, model_code=model_code,
+                            article_id=req.article_id)
+    return StreamingResponse(_sse_stream(_tap_history(events, req.question), request),
+                             media_type="text/event-stream; charset=utf-8",
+                             headers=SSE_HEADERS)
 
-        answer = ""
-        # 3) 调用 DeepSeek 流式接口，逐段转发；中途异常时输出可读提示而不是直接断流
-        try:
-            async for delta in llm.stream_chat(messages):
-                answer += delta
-                yield delta
-        except Exception as e:
-            print(f"[流式错误][chat] {e}")
-            yield "抱歉，AI 服务暂时不可用，请稍后重试。" if not answer else "\n\n> ⚠️ 回答生成中断，请重试。"
-            return
-        # 4) 流结束后将本轮问答写入 SQLite 历史
-        await asyncio.to_thread(db.add_chat, req.question, answer)
 
-        # 5) 追加来源信息（JSON 行，前端据此展示相关文章卡片）
-        sources = []
-        seen = set()
-        for c in contexts:
-            if c.get("source_type") == "article":
-                key = c.get("article_id")
-                if key in seen:
-                    continue
-                seen.add(key)
-                sources.append({
-                    "type": "article",
-                    "article_id": c.get("article_id"),
-                    "title": c.get("title", ""),
-                    "slug": c.get("slug", ""),
-                    "url": c.get("url", ""),
-                    "category": c.get("category", ""),
-                })
-            else:
-                key = c.get("filename")
-                if key in seen:
-                    continue
-                seen.add(key)
-                sources.append({
-                    "type": "pdf",
-                    "filename": c.get("filename", ""),
-                    "page": c.get("page", 0),
-                })
-        import json as _json
-        yield "\n@@SOURCES@@\n" + _json.dumps(sources, ensure_ascii=False)
+async def _tap_history(events, question: str):
+    """
+    旁路记录回答全文，流结束后写进本地 SQLite 历史（只用于 /history 调试与回溯）。
 
-    # 以 text/plain 流式返回，前端用 ReadableStream 逐块读取
-    return StreamingResponse(
-        generate(),
-        media_type="text/plain; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    ⚠️ 这张表没有 user_id，所以**不能**反过来当多轮对话记忆用 ——
+    那会把别人的提问塞进你的上下文。多轮记忆要等 trace 表按用户查（见文档 §6.2）。
+    """
+    answer: list[str] = []
+
+    def _on_token(text: str) -> None:
+        answer.append(text)
+
+    async for event, data in events:
+        if event == "token":
+            _on_token(str(data.get("text") or ""))
+        yield event, data
+
+    if answer:
+        with suppress(Exception):
+            await asyncio.to_thread(db.add_chat, question, "".join(answer))
 
 
 # ---------------- 接口四：聊天历史 ----------------

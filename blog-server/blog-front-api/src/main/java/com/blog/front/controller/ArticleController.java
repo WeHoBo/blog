@@ -13,6 +13,7 @@ import com.blog.common.entity.User;
 import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.CategoryMapper;
 import com.blog.common.mapper.UserMapper;
+import com.blog.common.exception.BusinessException;
 import com.blog.front.cache.ArticleCacheKeys;
 import com.blog.front.service.ArticleService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,6 +29,8 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -237,8 +240,56 @@ public class ArticleController {
     }
 
     /**
+     * 发布热力图：按月返回「每天发了多少篇」（首页左侧日历用）。
+     *
+     * <p><b>公开接口</b>：首页日历是给所有访客看的，不能挂 admin 注解。
+     *
+     * <p>⚠️ 历史事故（2026-11-14 发现）：这个方法的 javadoc 和
+     * {@code @PreAuthorize("hasRole('admin')")} 曾经和下面 slugAvailable 的注释**插错位置**，
+     * 导致管理员注解落到了热力图上、而 slug 探测变成匿名可访问。症状很隐蔽：
+     * **管理员登录后一切正常，只有访客看到首页日历整块空白**（接口 403），
+     * 在后台反复点都复现不出来。
+     *
+     * <p>可以安全公开的依据见 {@code ArticleMapper#countPublishedByDay}：
+     * 只统计 {@code status=1 AND is_deleted=0}，草稿和回收站的数量不会泄露。
+     *
+     * @param month 形如 2026-11；不传则取当前月
+     */
+    @GetMapping("/contribution")
+    public Result<Map<String, Object>> contribution(@RequestParam(required = false) String month) {
+        YearMonth ym;
+        try {
+            ym = (month == null || month.isBlank()) ? YearMonth.now() : YearMonth.parse(month.trim());
+        } catch (Exception e) {
+            throw new BusinessException(400, "月份格式应为 YYYY-MM");
+        }
+        List<Map<String, Object>> rows = articleMapper.countPublishedByDay(
+                ym.atDay(1).atStartOfDay(),
+                ym.plusMonths(1).atDay(1).atStartOfDay());
+        Map<String, Integer> days = new LinkedHashMap<>();
+        int total = 0;
+        for (Map<String, Object> row : rows) {
+            Object d = row.get("day");
+            Object c = row.get("cnt");
+            if (d == null || !(c instanceof Number n)) {
+                continue;
+            }
+            days.put(String.valueOf(d), n.intValue());
+            total += n.intValue();
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("month", ym.toString());
+        data.put("days", days);
+        data.put("total", total);
+        return Result.ok(data);
+    }
+
+    /**
      * 自定义 URL 可用性预检。编辑器在 slug 失焦时调用，
      * 把「唯一键冲突」这类只有保存时才会暴露的问题提前到输入阶段。
+     *
+     * <p>需要管理员：它能探测「某个还没发布的 slug 是否已被占用」，属于后台能力。
+     * 前端只有 {@code ArticleEditor.vue} 调用它，公开页面不用。
      */
     @PreAuthorize("hasRole('admin')")
     @GetMapping("/slug-available")
@@ -348,7 +399,7 @@ public class ArticleController {
         return Result.ok();
     }
 
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasRole('super')")
     @DeleteMapping("/{id:\\d+}/force")
     public Result<?> forceDelete(@PathVariable Long id) {
         articleService.forceDelete(id);
@@ -356,7 +407,7 @@ public class ArticleController {
         return Result.ok();
     }
 
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasRole('super')")
     @PostMapping("/batch-force-delete")
     public Result<?> batchForceDelete(@RequestBody List<Long> ids) {
         for (Long id : ids) {

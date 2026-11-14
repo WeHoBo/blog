@@ -504,11 +504,12 @@ class ArticleServiceTest {
 
     @Test
     void create_scheduledInPast_publishesImmediately() {
+        LocalDateTime chosen = LocalDateTime.now().minusHours(1);
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("时间已过");
         dto.setStatus(0);
         dto.setContentMd("正文");
-        dto.setPublishAt(LocalDateTime.now().minusHours(1));
+        dto.setPublishAt(chosen);
 
         ArticleService s = service();
         s.create(dto, 1L);
@@ -516,7 +517,30 @@ class ArticleServiceTest {
         ArgumentCaptor<Article> captor = ArgumentCaptor.forClass(Article.class);
         verify(articleMapper).insert(captor.capture());
         assertEquals(1, captor.getValue().getStatus(), "定时时间已过应视同立即发布");
-        assertEquals(null, captor.getValue().getPublishAt(), "立即发布后不应再挂着定时时间");
+        // 旧断言是 assertNull(publishAt)：那时 publish_at 只表示「未来的定时时刻」，
+        // 发布时会被清掉。现在它同时是「发布时间」（首页热力图与卡片日期都靠它），
+        // 所以已发布文章必须保留用户选的时间，不能清成 NULL。
+        assertEquals(chosen, captor.getValue().getPublishAt(), "立即发布后应保留用户选的发布时间");
+    }
+
+    @Test
+    void create_publishedWithoutTime_usesNow() {
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("直接发布");
+        dto.setStatus(1);
+        dto.setContentMd("正文");
+        // 没传 publishAt：发布时间必填，但前端已默认预填；后端也要兜底成当前时间，
+        // 不能留 NULL，否则热力图上这篇会退回 create_time、和卡片显示的日期不一致。
+        LocalDateTime before = LocalDateTime.now().minusSeconds(2);
+        ArticleService s = service();
+        s.create(dto, 1L);
+
+        ArgumentCaptor<Article> captor = ArgumentCaptor.forClass(Article.class);
+        verify(articleMapper).insert(captor.capture());
+        LocalDateTime at = captor.getValue().getPublishAt();
+        assertNotNull(at, "立即发布必须落一个发布时间");
+        assertTrue(!at.isBefore(before) && !at.isAfter(LocalDateTime.now().plusSeconds(2)),
+                "未指定时间时应取当前时间，实际 " + at);
     }
 
     // ---------------- 导入 / 导出 ----------------

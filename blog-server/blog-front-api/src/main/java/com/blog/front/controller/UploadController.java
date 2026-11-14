@@ -31,8 +31,49 @@ public class UploadController {
     private static final Set<String> ALLOWED_EXT = Set.of(
             "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "avif", "pdf");
 
+    /** 头像只允许图片，且不要 pdf/ico —— 头像框是固定尺寸的方形，矢量/文档类型没有意义。 */
+    private static final Set<String> AVATAR_EXT = Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif");
+
+    /** 头像大小上限 2MB。前端会先压到 512px 的 WebP，正常只有几十 KB。 */
+    private static final long AVATAR_MAX_BYTES = 2L * 1024 * 1024;
+
     private final FileStorage fileStorage;
     private final UploadFileMapper uploadFileMapper;
+
+    /**
+     * 上传**自己的头像**。
+     *
+     * 为什么单独开一个接口，而不是把 `/api/upload` 的 `hasRole('admin')` 拆掉：
+     * `/api/upload` 是「后台素材库」的入口，它会把每次上传写进 `upload_file` 表，
+     * 素材库页面按这张表分页展示。如果直接放开给所有登录用户，普通用户的头像就会混进
+     * 管理员的素材库列表里，越用越乱。
+     * 所以这里：任何登录用户可用、只收图片、限 2MB、**不写素材库表**。
+     */
+    @PostMapping("/avatar")
+    public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("上传文件为空");
+        }
+        if (file.getSize() > AVATAR_MAX_BYTES) {
+            throw new BusinessException(400, "头像不能超过 2MB");
+        }
+        String originalName = file.getOriginalFilename();
+        String ext = "";
+        if (originalName != null && originalName.lastIndexOf('.') != -1) {
+            ext = originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+        }
+        if (!AVATAR_EXT.contains(ext)) {
+            throw new BusinessException(400, "头像仅支持图片格式: " + String.join(", ", AVATAR_EXT));
+        }
+        String contentType = file.getContentType();
+        if (contentType != null && !contentType.isBlank() && !contentType.startsWith("image/")) {
+            throw new BusinessException(400, "文件内容类型不合法: " + contentType);
+        }
+        String url = fileStorage.upload(file);
+        log.info("头像上传成功: userId={}, ext={}, size={}B, url={}",
+                currentUserId(), ext, file.getSize(), url);
+        return Result.ok(url);
+    }
 
     @PreAuthorize("hasRole('admin')")
     @PostMapping

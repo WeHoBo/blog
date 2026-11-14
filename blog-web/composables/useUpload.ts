@@ -52,6 +52,29 @@ export const useUpload = () => {
   }
 
   /**
+   * 上传头像：走 `/api/upload/avatar`，任何登录用户都能用。
+   *
+   * 不能用上面的 `upload()` —— 它打的是 `/api/upload`，那个接口是后台素材库入口，
+   * 后端标了 `@PreAuthorize("hasRole('admin')")`，普通用户必然 403。
+   * 头像接口只收图片、限 2MB、且不写素材库表，避免用户头像混进管理员素材库。
+   */
+  async function uploadAvatar(file: File): Promise<string> {
+    // 头像框最大也就 96px，压到 512px 足够清晰，还能把几 MB 的原图降到几十 KB
+    const small = await compressImage(file, 512, 0.9)
+    const formData = new FormData()
+    formData.append('file', small)
+    const res: any = await $fetch(`${apiBase}/upload/avatar`, {
+      method: 'POST',
+      body: formData,
+      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    })
+    if (res.code === 200) {
+      return res.data
+    }
+    throw new Error(res.message || '头像上传失败')
+  }
+
+  /**
    * 前端压缩：超过 1MB 的图片转成 WebP 并压到 1600px 以内再上传。
    * 博客插图重在清晰可读，1600px 对绝大多数正文插图已经绰绰有余，
    * 能显著减少对象存储流量与首屏加载时间。压缩失败时返回原文件，绝不阻塞上传。
@@ -80,5 +103,5 @@ export const useUpload = () => {
     }
   }
 
-  return { upload, uploadWithProgress, compressImage }
+  return { upload, uploadWithProgress, uploadAvatar, compressImage }
 }

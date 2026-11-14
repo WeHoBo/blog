@@ -39,10 +39,10 @@ const { data } = await useAsyncData('archive', async () => {
 })
 
 useSeoMeta({
-  title: '文章归档 - 好啵博客',
-  description: '好啵博客的文章归档：按年月浏览全部已发布的技术文章。',
-  ogTitle: '文章归档 - 好啵博客',
-  ogDescription: '按年月浏览好啵博客的全部已发布文章。',
+  title: '文章归档 - 博观',
+  description: '博观的文章归档：按年月浏览全部已发布的技术文章。',
+  ogTitle: '文章归档 - 博观',
+  ogDescription: '按年月浏览博观的全部已发布文章。',
   ogImage: 'https://codeup.asia/apple-touch-icon.png'
 })
 useHead({ link: [{ rel: 'canonical', href: 'https://codeup.asia/archive' }] })

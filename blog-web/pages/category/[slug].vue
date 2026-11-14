@@ -85,13 +85,13 @@ function goPage(p: number) {
 const canonicalUrl = computed(() => taxonomyCanonical('/category', category.value))
 
 useSeoMeta({
-  title: () => (category.value ? `${category.value.name} - 分类 - 好啵博客` : '分类文章 - 好啵博客'),
+  title: () => (category.value ? `${category.value.name} - 分类 - 博观` : '分类文章 - 博观'),
   description: () =>
     category.value
-      ? `好啵博客「${category.value.name}」分类下的技术文章，共 ${category.value.articleCount || total.value} 篇。`
-      : '按分类浏览好啵博客的技术文章。',
-  ogTitle: () => (category.value ? `${category.value.name} - 分类 - 好啵博客` : '分类文章 - 好啵博客'),
-  ogDescription: () => (category.value ? `「${category.value.name}」分类下的技术文章。` : '按分类浏览好啵博客的技术文章。'),
+      ? `博观「${category.value.name}」分类下的技术文章，共 ${category.value.articleCount || total.value} 篇。`
+      : '按分类浏览博观的技术文章。',
+  ogTitle: () => (category.value ? `${category.value.name} - 分类 - 博观` : '分类文章 - 博观'),
+  ogDescription: () => (category.value ? `「${category.value.name}」分类下的技术文章。` : '按分类浏览博观的技术文章。'),
   ogUrl: () => canonicalUrl.value
 })
 useHead(() => ({ link: [{ rel: 'canonical', href: canonicalUrl.value }] }))

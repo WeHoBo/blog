@@ -30,9 +30,26 @@ import { ossImage, IMG_W } from '~/utils/image'
 import { renderMarkdown } from '~/utils/markdownCore'
 
 const { get } = useApi()
-const links = ref<any[]>([])
-const siteName = ref('好啵博客')
-const aboutContent = ref('')
+
+/**
+ * 站点名与「关于页内容」都来自后台站点设置。
+ * 这里 await useSiteConfig()（key 与布局/首页共用，不会多发一次请求）而不是
+ * setup 里裸发 fetch —— 后者在 SSR 阶段拿不到数据，缓存命中时会把空内容写进 HTML，
+ * 爬虫看到的就是一页空「关于」。
+ */
+const { data: siteCfg } = await useSiteConfig()
+const siteName = computed(() => (siteCfg.value?.siteName || '').trim() || '博观')
+const aboutContent = computed(() => (siteCfg.value?.aboutContent || '').trim())
+
+const { data: linkList } = await useAsyncData('about-links', async () => {
+  try {
+    const res = await get<any>('/friend-link/list')
+    return res?.code === 200 ? (res.data || []) : []
+  } catch {
+    return []
+  }
+})
+const links = computed<any[]>(() => linkList.value || [])
 
 const renderedAbout = computed(() => {
   if (!aboutContent.value) return ''
@@ -44,38 +61,18 @@ const renderedAbout = computed(() => {
   return renderMarkdown(aboutContent.value)
 })
 
-async function fetchLinks() {
-  try {
-    const res = await get<any>('/friend-link/list')
-    if (res.code === 200) links.value = res.data || []
-  } catch { /* 容错 */ }
-}
-
-async function fetchConfig() {
-  try {
-    const res = await get<any>('/site-config/public')
-    if (res.code === 200 && res.data) {
-      siteName.value = res.data.siteName || '好啵博客'
-      aboutContent.value = res.data.aboutContent || ''
-    }
-  } catch { /* 容错 */ }
-}
-
 function fixUrl(url: string) {
   if (!url) return ''
   if (url.startsWith('http://') || url.startsWith('https://')) return url
   return 'https://' + url
 }
 
-fetchLinks()
-fetchConfig()
-
 useSeoMeta({
-  title: '关于 - 好啵博客',
-  description: '关于好啵博客：一个程序员记录技术思考、编程心得与学习笔记的地方。',
-  ogTitle: '关于 - 好啵博客',
-  ogDescription: '关于好啵博客：记录技术思考与编程心得。',
-  ogImage: 'https://codeup.asia/apple-touch-icon.png'
+  title: () => `关于 - ${siteName.value}`,
+  description: () => `关于${siteName.value}：一个程序员记录技术思考、编程心得与学习笔记的地方。`,
+  ogTitle: () => `关于 - ${siteName.value}`,
+  ogDescription: () => `关于${siteName.value}：记录技术思考与编程心得。`,
+  ogImage: 'https://codeup.asia/logo.png'
 })
 useHead({ link: [{ rel: 'canonical', href: 'https://codeup.asia/about' }] })
 </script>

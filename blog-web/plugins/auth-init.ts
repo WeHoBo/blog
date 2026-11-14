@@ -10,6 +10,7 @@ export default defineNuxtPlugin(async () => {
           username: res.data.username,
           nickname: res.data.nickname,
           avatar: res.data.avatar,
+          bio: res.data.bio,
           role: res.data.role
         })
       }

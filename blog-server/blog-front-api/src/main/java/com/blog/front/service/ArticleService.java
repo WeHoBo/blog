@@ -112,6 +112,8 @@ public class ArticleService {
         wrapper.select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary, Article::getCover,
                 Article::getViewCount, Article::getCommentCount, Article::getIsTop,
                 Article::getCategoryId, Article::getCreateTime, Article::getWordCount,
+                // 列表卡片上的日期优先显示「发布时间」，所以要把它一起查出来
+                Article::getPublishAt,
                 Article::getUserId);
         return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
@@ -227,6 +229,25 @@ public class ArticleService {
         } else {
             // 只读：把「缓存里的基准值 + 窗口内增量」算出来展示，不写库也不自增
             article.setViewCount(currentViewCount(id, article.getViewCount()));
+        }
+        return article;
+    }
+
+    /**
+     * 按 slug 取公开文章（AI 工具用）。
+     *
+     * <p>不进缓存：slug 只在模型偶尔按 URL 反查时用到，命中率低，没必要占缓存位。
+     * 但**必须**走 {@link #isPublicArticle} 判断，否则模型能通过 slug 读到草稿。
+     */
+    public Article getPublicBySlug(String slug) {
+        if (StrUtil.isBlank(slug)) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        Article article = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
+                .eq(Article::getSlug, slug.trim())
+                .last("LIMIT 1"));
+        if (article == null || !isPublicArticle(article)) {
+            throw new BusinessException(404, "文章不存在");
         }
         return article;
     }
@@ -592,10 +613,11 @@ public class ArticleService {
             return 0;
         }
         for (Article a : due) {
+            // 只翻状态，**不清 publish_at**：它就是这篇文章的发布时间，
+            // 热力图与卡片日期都靠它（清掉会退回 create_time，等于定时发布的时间白选了）。
             articleMapper.update(null, new LambdaUpdateWrapper<Article>()
                     .eq(Article::getId, a.getId())
-                    .set(Article::getStatus, 1)
-                    .set(Article::getPublishAt, null));
+                    .set(Article::getStatus, 1));
             evictArticleCache(a.getId());
         }
         redisTemplate.delete(List.of(ArticleCacheKeys.ARCHIVE, ArticleCacheKeys.SERIES));
@@ -659,6 +681,33 @@ public class ArticleService {
         }
         List<Long> tagIds = ats.stream().map(ArticleTag::getTagId).toList();
         return tagMapper.selectBatchIds(tagIds);
+    }
+
+    /**
+     * 批量取多篇文章的标签名。
+     *
+     * <p>供 AI 工具检索结果使用：一次查回 5~8 篇的标签，避免逐篇调 {@link #getTagsByArticleId} 打出 N 次查询。
+     */
+    public Map<Long, List<String>> tagNamesByArticleIds(List<Long> articleIds) {
+        if (articleIds == null || articleIds.isEmpty()) {
+            return Map.of();
+        }
+        List<ArticleTag> relations = articleTagMapper.selectList(
+                new LambdaQueryWrapper<ArticleTag>().in(ArticleTag::getArticleId, articleIds));
+        if (relations.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> tagIds = relations.stream().map(ArticleTag::getTagId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, String> nameById = tagMapper.selectBatchIds(tagIds).stream()
+                .collect(Collectors.toMap(Tag::getId, Tag::getName, (a, b) -> a));
+        Map<Long, List<String>> result = new HashMap<>();
+        for (ArticleTag relation : relations) {
+            String name = nameById.get(relation.getTagId());
+            if (name != null) {
+                result.computeIfAbsent(relation.getArticleId(), k -> new ArrayList<>()).add(name);
+            }
+        }
+        return result;
     }
 
     /** 标签全量替换：先删后插。标签数量很少，这样比逐条 diff 更不容易出错。 */
@@ -1032,15 +1081,20 @@ public class ArticleService {
     /**
      * 落定发布状态与定时时间。
      * <p>
-     * 规则：status=1 → 立即发布并清掉 publishAt；status=0 且 publishAt 在未来 → 挂定时；
-     * status=0 且 publishAt 已过 → 视同立即发布（用户意图明显是「现在就要发」）。
+     * 规则：status=1 → 立即发布，**保留**用户选的发布时间（没选就取当前时间）；
+     * status=0 且 publishAt 在未来 → 挂定时；status=0 且 publishAt 已过 → 视同立即发布。
+     * <p>
+     * ⚠️ 这里曾经是「status=1 就把 publishAt 清成 NULL」。那会让「发布时间」这个字段
+     * 对已发布文章永远为空，于是发布热力图 / 卡片日期只能退回 create_time ——
+     * 用户明明选了时间却不生效。现在它的语义是「这篇文章的发布时间」，
+     * 草稿阶段同一个字段兼职「定时发布时刻」，两者不冲突（草稿还没发布，没有发布时间）。
      */
     private void applyPublishSchedule(Article article, ArticleDTO dto) {
         Integer status = dto.getStatus() == null ? 0 : dto.getStatus();
         LocalDateTime publishAt = dto.getPublishAt();
         if (status == 1) {
             article.setStatus(1);
-            article.setPublishAt(null);
+            article.setPublishAt(publishAt != null ? publishAt : LocalDateTime.now());
             return;
         }
         article.setStatus(0);
@@ -1050,7 +1104,7 @@ public class ArticleService {
             article.setPublishAt(publishAt);
         } else {
             article.setStatus(1);
-            article.setPublishAt(null);
+            article.setPublishAt(publishAt);
         }
     }
 

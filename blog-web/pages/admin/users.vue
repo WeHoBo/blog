@@ -21,11 +21,15 @@
           <tbody>
             <tr v-for="u in users" :key="u.id" class="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
               <td class="px-4 py-3 text-gray-400">{{ u.id }}</td>
-              <td class="px-4 py-3 font-medium">{{ u.username }}</td>
+              <td class="px-4 py-3 font-medium">
+                {{ u.username }}
+                <span v-if="u.id === authStore.user?.userId" class="ml-1 text-[11px] text-gray-400">（你）</span>
+              </td>
               <td class="px-4 py-3">{{ u.nickname || '-' }}</td>
               <td class="px-4 py-3 text-gray-400 text-xs">{{ u.email || '-' }}</td>
               <td class="px-4 py-3">
-                <span :class="u.role === 'admin' ? 'text-red-500' : 'text-gray-500'" class="text-xs font-medium">{{ u.role === 'admin' ? '管理员' : '用户' }}</span>
+                <span v-if="u.role === 'super'" class="text-xs font-medium text-primary-600 dark:text-primary-400">超级管理员</span>
+                <span v-else :class="u.role === 'admin' ? 'text-red-500' : 'text-gray-500'" class="text-xs font-medium">{{ u.role === 'admin' ? '管理员' : '用户' }}</span>
               </td>
               <td class="px-4 py-3 text-xs text-gray-400">{{ u.source || 'local' }}</td>
               <td class="px-4 py-3">
@@ -51,14 +55,19 @@
           </div>
           <div>
             <label class="text-xs text-gray-400">角色</label>
-            <select v-model="dialogForm.role" aria-label="角色" class="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm mt-1">
+            <select v-model="dialogForm.role" aria-label="角色" :disabled="isSuperTarget"
+                    class="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm mt-1 disabled:opacity-60">
               <option value="user">用户</option>
               <option value="admin">管理员</option>
+              <!-- 仅为把超管那一行显示对；后端不允许改 super，所以这个选项选不了 -->
+              <option value="super" disabled>超级管理员（仅数据库授予）</option>
             </select>
+            <p class="text-[11px] text-gray-400 mt-1">超级管理员全站只有一个，只能在数据库里改，后台不提供授予入口。</p>
           </div>
           <div>
             <label class="text-xs text-gray-400">状态</label>
-            <select v-model="dialogForm.status" aria-label="状态" class="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm mt-1">
+            <select v-model="dialogForm.status" aria-label="状态" :disabled="isSuperTarget"
+                    class="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm mt-1 disabled:opacity-60">
               <option :value="1">正常</option>
               <option :value="0">禁用</option>
             </select>
@@ -80,15 +89,19 @@
 </template>
 
 <script setup lang="ts">
-definePageMeta({ middleware: 'admin', layout: 'admin' })
+definePageMeta({ middleware: ['admin', 'super-admin'], layout: 'admin' })
 
 const { get, put } = useApi()
 const { toast } = useFeedback()
+const authStore = useAuthStore()
 const users = ref<any[]>([])
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editUser = ref<any>(null)
 const dialogForm = reactive({ nickname: '', role: 'user', status: 1, password: '' })
+
+/** 正在编辑的这行是超管本人：角色/状态一律锁死（后端也会拒，这里只是别让人白点） */
+const isSuperTarget = computed(() => editUser.value?.role === 'super')
 
 async function fetchList() {
   const res = await get<any>('/admin/user/list?pageSize=100')

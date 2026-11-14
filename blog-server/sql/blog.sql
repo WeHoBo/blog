@@ -21,6 +21,7 @@ CREATE TABLE user (
     password    VARCHAR(255) NOT NULL COMMENT '密码',
     nickname    VARCHAR(50)  DEFAULT NULL COMMENT '昵称',
     avatar      VARCHAR(500) DEFAULT NULL COMMENT '头像',
+    bio         VARCHAR(200) DEFAULT NULL COMMENT '个人简介，用户在个人中心自己写',
     email       VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
     role        VARCHAR(20)  DEFAULT 'user' COMMENT '角色 admin/user',
     github_id   VARCHAR(50)  DEFAULT NULL COMMENT 'GitHub openId',

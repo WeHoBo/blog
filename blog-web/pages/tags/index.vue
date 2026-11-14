@@ -90,10 +90,10 @@ function cloudSize(t: TaxonomyItem) {
 }
 
 useSeoMeta({
-  title: '标签云 - 好啵博客',
-  description: '好啵博客的全部技术标签：按标签快速找到 Java、SpringBoot、Vue、Nuxt、Python、Linux、Docker 等主题下的文章。',
-  ogTitle: '标签云 - 好啵博客',
-  ogDescription: '按标签浏览好啵博客的全部技术文章。',
+  title: '标签云 - 博观',
+  description: '博观的全部技术标签：按标签快速找到 Java、SpringBoot、Vue、Nuxt、Python、Linux、Docker 等主题下的文章。',
+  ogTitle: '标签云 - 博观',
+  ogDescription: '按标签浏览博观的全部技术文章。',
   ogUrl: `${SITE_URL}/tags`
 })
 useHead({ link: [{ rel: 'canonical', href: `${SITE_URL}/tags` }] })

@@ -5,10 +5,12 @@
       <NuxtLink to="/admin/articles" class="text-sm text-gray-500 hover:text-primary-500">← 返回文章管理</NuxtLink>
     </div>
 
+    <p v-if="!isSuper" class="text-xs text-gray-400 mb-4">彻底删除不可恢复，只有超级管理员能操作；这里只提供「恢复」。</p>
+
     <div v-if="selectedIds.length > 0" class="bg-primary-50 dark:bg-primary-900/20 rounded-lg px-4 py-3 mb-4 flex items-center gap-4 text-sm flex-wrap">
       <span class="text-primary-600 dark:text-primary-400 font-medium">已选 {{ selectedIds.length }} 篇</span>
       <button @click="handleBatchRestore" class="px-3 py-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-xs">批量恢复</button>
-      <button @click="handleBatchForceDelete" class="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-xs">彻底删除</button>
+      <button v-if="isSuper" @click="handleBatchForceDelete" class="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-xs">彻底删除</button>
       <button @click="selectedIds = []" class="text-gray-400 hover:text-gray-600 transition text-xs">取消选择</button>
     </div>
 
@@ -46,7 +48,7 @@
               <td class="px-4 py-3 text-gray-400 whitespace-nowrap">{{ a.updateTime?.replace('T', ' ').substring(0, 16) }}</td>
               <td class="px-4 py-3 whitespace-nowrap">
                 <button @click="handleRestore(a.id)" class="text-green-500 hover:underline text-xs mr-3">恢复</button>
-                <button @click="handleForceDelete(a.id)" class="text-red-500 hover:underline text-xs">彻底删除</button>
+                <button v-if="isSuper" @click="handleForceDelete(a.id)" class="text-red-500 hover:underline text-xs">彻底删除</button>
               </td>
             </tr>
           </tbody>
@@ -60,6 +62,10 @@
 
 <script setup lang="ts">
 definePageMeta({ middleware: 'admin', layout: 'admin' })
+
+/** "彻底删除"不可恢复，后端收紧到 hasRole('super')，普通管理员这里不显示按钮 */
+const authStore = useAuthStore()
+const isSuper = computed(() => authStore.isSuper)
 
 const { get, post, del } = useApi()
 const { toast, confirmDialog } = useFeedback()

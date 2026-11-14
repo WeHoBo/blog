@@ -9,7 +9,9 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface ArticleMapper extends BaseMapper<Article> {
@@ -22,6 +24,25 @@ public interface ArticleMapper extends BaseMapper<Article> {
             + "WHERE status = 1 AND is_deleted = 0 AND category_id IS NOT NULL "
             + "GROUP BY category_id")
     List<CategoryArticleCount> countPublishedByCategory();
+
+    /**
+     * 按天统计「已经发出去的文章数」，供首页的发布热力图使用。
+     * <p>
+     * 日期取值 = {@code COALESCE(publish_at, create_time)}：
+     * 新流程下立即发布也保留用户选的发布时间（见 ArticleService#applyPublishSchedule），
+     * 而历史文章 publish_at 是 NULL，就自然回落到 create_time ——
+     * 这样「原有文章」不需要补数据也会被动态算进去。
+     * <p>
+     * 只统计 status=1 且未删除：草稿和回收站里的文章不该出现在热力图里。
+     */
+    @Select("SELECT DATE_FORMAT(COALESCE(publish_at, create_time), '%Y-%m-%d') AS day, "
+            + "COUNT(*) AS cnt FROM article "
+            + "WHERE status = 1 AND is_deleted = 0 "
+            + "AND COALESCE(publish_at, create_time) >= #{from} "
+            + "AND COALESCE(publish_at, create_time) < #{to} "
+            + "GROUP BY day")
+    List<Map<String, Object>> countPublishedByDay(@Param("from") LocalDateTime from,
+                                                  @Param("to") LocalDateTime to);
 
     /**
      * 把「还没有分类」的文章统一归属到默认分类（「未建档文章」）。

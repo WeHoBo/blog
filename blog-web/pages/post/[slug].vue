@@ -47,9 +47,9 @@ const canonicalUrl = computed(() => `${SITE_URL}/post/${route.params.slug}`)
 // 这个 URL 最规范，此前却完全没有 SEO meta：补上 title/description/og，
 // 并声明 canonical（与 /article/{id} 去重，避免同一篇内容两个 URL 互相稀释权重）。
 useSeoMeta({
-  title: () => (article.value?.title ? `${article.value.title} - 好啵博客` : '文章 - 好啵博客'),
-  description: () => article.value?.summary || '好啵博客技术文章',
-  ogTitle: () => article.value?.title || '好啵博客',
+  title: () => (article.value?.title ? `${article.value.title} - 博观` : '文章 - 博观'),
+  description: () => article.value?.summary || '博观技术文章',
+  ogTitle: () => article.value?.title || '博观',
   ogDescription: () => article.value?.summary || '一个程序员的个人技术博客',
   ogImage: () => article.value?.cover || `${SITE_URL}/apple-touch-icon.png`,
   ogType: 'article',
@@ -70,7 +70,7 @@ useHead(() => ({
           image: article.value.cover ? [article.value.cover] : undefined,
           datePublished: article.value.createTime || undefined,
           dateModified: article.value.updateTime || article.value.createTime || undefined,
-          author: { '@type': 'Person', name: '好啵' },
+          author: { '@type': 'Person', name: '博观' },
           mainEntityOfPage: canonicalUrl.value
         })
       }]

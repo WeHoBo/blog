@@ -18,6 +18,7 @@
     "@vscode/markdown-it-katex": "^1.1.2",
     "codemirror": "^6.0.2",
     "dayjs": "^1.11.11",
+    "echarts": "^6.1.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.47",
     "markdown-it": "^14.1.0",
@@ -28,6 +29,7 @@
     "pinia": "^2.1.7"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@nuxtjs/tailwindcss": "^6.12.1",
     "vitest": "^4.1.10"
   }

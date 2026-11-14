@@ -4,7 +4,7 @@ const router = useRouter()
 if (process.client) {
   router.replace('/')
 }
-useSeoMeta({ title: '好啵博客' })
+useSeoMeta({ title: '博观' })
 </script>
 
 <template>

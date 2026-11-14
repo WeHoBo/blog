@@ -23,7 +23,7 @@ public class AuthController {
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        return Result.ok(new LoginVO(null, user.getId(), user.getUsername(), user.getNickname(), user.getAvatar(), user.getRole()));
+        return Result.ok(new LoginVO(null, user.getId(), user.getUsername(), user.getNickname(), user.getAvatar(), user.getBio(), user.getRole()));
     }
 
     @PutMapping("/profile")
@@ -40,6 +40,15 @@ public class AuthController {
         // 密码登录已下线；若在此继续写密码，只会产生一个永远用不上的凭证。
         if (profile.getAvatar() != null) {
             user.setAvatar(profile.getAvatar());
+        }
+        // 简介由用户自己写（管理员也一样）。空串是「我要清空」，null 是「这次不改」，
+        // 所以这里用 != null 判断而不是 isNotBlank —— 否则用户清不掉原来的简介。
+        if (profile.getBio() != null) {
+            String bio = profile.getBio().trim();
+            if (bio.length() > 200) {
+                throw new BusinessException(400, "个人简介不能超过 200 字");
+            }
+            user.setBio(bio);
         }
         userMapper.updateById(user);
         return Result.ok();

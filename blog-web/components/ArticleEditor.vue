@@ -36,7 +36,14 @@
           <p class="mt-1 text-xs" :class="slugHint.cls">{{ slugHint.text }}</p>
         </div>
         <input v-model="form.series" placeholder="系列名(可选)" aria-label="系列名" class="lg:w-40 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
-        <input v-model="form.publishAt" type="datetime-local" aria-label="定时发布" class="lg:w-56 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
+        <div class="flex flex-col gap-1">
+          <label for="article-publish-at" class="text-[11px] text-gray-500 dark:text-gray-400">
+            发布时间<span class="text-primary-600 dark:text-primary-400"> *</span>
+          </label>
+          <input id="article-publish-at" v-model="form.publishAt" type="datetime-local" required
+            aria-label="发布时间（必填，同时用于首页热力图统计）"
+            class="lg:w-56 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
+        </div>
         <label class="flex items-center gap-1 text-xs text-gray-500 lg:border lg:rounded-lg lg:px-3 lg:py-2 dark:border-gray-600">
           <input type="checkbox" v-model="form.isTop" :true-value="1" :false-value="0" class="mr-1" /> 置顶
         </label>
@@ -181,6 +188,7 @@ definePageMeta({ middleware: 'admin', layout: 'admin' })
 const { get, post, put } = useApi()
 const { toast, confirmDialog } = useFeedback()
 const { upload, uploadWithProgress, compressImage } = useUpload()
+const purgeCache = usePurgeCache()
 const router = useRouter()
 
 const categories = ref<any[]>([])
@@ -209,6 +217,13 @@ let dragging = false
 let autosaveTimer: any = null
 let dirty = false
 
+/** datetime-local 需要本地时区的 `YYYY-MM-DDTHH:mm`（toISOString 会给 UTC，差 8 小时） */
+function nowLocalInput(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 const form = reactive({
   title: '',
   summary: '',
@@ -219,7 +234,9 @@ const form = reactive({
   isTop: 0,
   series: '',
   slug: '',
-  publishAt: ''
+  // 默认预填「现在」：发布时间是必填项，但绝大多数时候就是「此刻」，
+  // 每次手动选一遍纯属浪费；要改再改。
+  publishAt: nowLocalInput()
 })
 
 const saveState = computed(() => {
@@ -675,6 +692,12 @@ async function save(status: number, autosave = false) {
       toast('发布前请填写正文；如果还没写完，可以先「保存草稿」', 'error')
       return
     }
+    // 发布时间是必填项：首页的发布热力图、文章列表上的日期都以它为准，
+    // 空着落库就只能退回 create_time，等于热力图少记一篇。
+    if (!form.publishAt) {
+      toast('请选择发布时间（默认已填当前时间）', 'error')
+      return
+    }
     autoSummary()
   }
   saving.value = true
@@ -691,6 +714,9 @@ async function save(status: number, autosave = false) {
     }
     dirty = false
     if (!autosave) {
+      // 发布/更新后立刻清页面缓存：首页缓 20s、详情页缓 10s，
+      // 不清的话「发完文章回首页看不到」会持续十几秒。
+      if (status === 1) await purgeCache()
       toast(status === 1 ? '发布成功' : '已保存', 'success')
       if (status === 1) {
         // 发布成功后短暂停留再回列表
@@ -778,7 +804,10 @@ async function fetchArticle() {
       form.isTop = a.isTop ?? 0
       form.series = a.series || ''
       form.slug = a.slug || ''
-      form.publishAt = a.publishAt ? a.publishAt.replace(' ', 'T').slice(0, 16) : ''
+      // 老文章的 publish_at 是 NULL（旧逻辑发布时会清空），这里回落到 create_time：
+      // 既不留下空值（发布时间必填），也保证「编辑一下老文章」不会把它的发布日期改成今天
+      // ——否则热力图上那篇文章会凭空跳到今天。
+      form.publishAt = (a.publishAt || a.createTime || '').replace(' ', 'T').slice(0, 16)
     }
   } catch (e: any) {
     toast('加载文章失败: ' + (e.message || '未知错误'), 'error')

@@ -9,6 +9,24 @@ ai:
   rag-url: ${RAG_URL:http://127.0.0.1:8000}
   # 与 RAG 服务共享的调用令牌；需与 rag_system/backend/.env 的 RAG_API_TOKEN 一致
   rag-token: ${RAG_API_TOKEN:}
+  # 当前生效的模型标识，随请求透传给 RAG，用于用量归属。
+  # P2 起以数据库 ai_model / ai_setting 为准，这里只是注册表不可用时的兜底默认值。
+  model-code: ${AI_MODEL_CODE:deepseek-chat}
+  # 后台填写的模型密钥用 AES-256-GCM 加密后入库，主密钥来自这里。
+  # ⚠️ 一旦更换，已入库的密钥全部无法解密（后台需要重新填一遍），请按"长期不变"对待。
+  # 为空时后台不允许"直接填写密钥"，只能用 apiKeyEnv 模式（密钥留在环境变量里）。
+  key-secret: ${AI_KEY_SECRET:}
+  # 单价：元 / 百万 token。按厂商现价填，调价时同步改这里（历史账单已快照，不会被改写）
+  price:
+    input: ${AI_PRICE_INPUT:2.0}
+    output: ${AI_PRICE_OUTPUT:8.0}
+  # 配额：三层窗口 + IP 兜底。任一置 0 表示该层不限制；管理员始终不受限（但仍记账）
+  limits:
+    enabled: ${AI_LIMITS_ENABLED:true}
+    minute: ${AI_LIMIT_MINUTE:5}
+    hourly: ${AI_LIMIT_HOURLY:30}
+    daily: ${AI_LIMIT_DAILY:100}
+    ip-daily: ${AI_LIMIT_IP_DAILY:300}
 
 server:
   port: 8080

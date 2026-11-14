@@ -18,6 +18,20 @@ import requests
 # 本地 RAG 服务地址（与 main.py 启动端口一致）
 RAG_BASE = os.getenv("RAG_BASE", "http://127.0.0.1:8000")
 
+# 调用令牌：main.py 把 verify_token 挂在 app 级依赖上，/ingest-articles 也要过。
+# 以前 RAG_API_TOKEN 为空时脚本能跑，配上 token 后就会 401 —— 所以必须显式带上。
+# 用 config 读而不是 os.getenv：config 会 load_dotenv(backend/.env)，
+# 直接 os.getenv 在 systemd 之外手动执行时读不到 .env 里的值。
+try:
+    import config
+    RAG_TOKEN = config.RAG_API_TOKEN
+except Exception:
+    RAG_TOKEN = os.getenv("RAG_API_TOKEN", "")
+
+
+def _headers() -> dict:
+    return {"X-RAG-Token": RAG_TOKEN} if RAG_TOKEN else {}
+
 
 def fetch_articles(host: str, user: str, password: str, db: str) -> list[dict]:
     """直连 MySQL 读取已发布文章（含分类名）"""
@@ -54,8 +68,10 @@ def main() -> None:
 
     articles = fetch_articles(args.host, args.user, args.password, args.db)
     print(f"[导入] 从 MySQL 读到 {len(articles)} 篇已发布文章")
+    print(f"[导入] 调用令牌: {'已携带' if RAG_TOKEN else '未配置（服务端也未配 token 时才能通过）'}")
 
     total = 0
+    failed_total = 0
     for i in range(0, len(articles), args.batch):
         batch = articles[i:i + args.batch]
         payload = [{
@@ -65,12 +81,26 @@ def main() -> None:
             "slug": a["slug"] or "",
             "category": a["category"] or "",
         } for a in batch]
-        resp = requests.post(f"{RAG_BASE}/ingest-articles", json=payload, timeout=120)
+        resp = requests.post(
+            f"{RAG_BASE}/ingest-articles",
+            json=payload,
+            headers=_headers(),
+            timeout=180,
+        )
         resp.raise_for_status()
         data = resp.json()
         total += data.get("chunks", 0)
-        print(f"[导入] 批次 {i // args.batch + 1}: {len(batch)} 篇, {data.get('chunks', 0)} 块")
-    print(f"[完成] 共 {len(articles)} 篇文章, {total} 个文本块已入库")
+        failed = data.get("failed") or []
+        failed_total += len(failed)
+        print(f"[导入] 批次 {i // args.batch + 1}: {len(batch)} 篇, {data.get('chunks', 0)} 块"
+              + (f", 失败 {len(failed)} 篇" if failed else ""))
+        # ⚠️ 必须把 failed 打出来：接口对单篇失败只放进这个数组，
+        # HTTP 依然 200。不打的话就是"导入完成"但检索永远搜不到某几篇。
+        for f in failed:
+            print(f"        x id={f.get('id')} {str(f.get('title', ''))[:28]} -> {f.get('error')}")
+    print(f"[完成] 共 {len(articles)} 篇文章, {total} 个文本块已入库, 失败 {failed_total} 篇")
+    if failed_total:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

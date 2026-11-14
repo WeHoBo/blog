@@ -142,6 +142,39 @@ python main.py
 > - Python 侧 `RAG_API_TOKEN` 为空时会**跳过校验**并打印启动警告 → 必须两侧配同一个值才真正生效。
 > - 绑 `127.0.0.1` 意味着 **RAG 必须与 Java 后端同机**；若需分机部署，请改回内网地址并自行加网络层防护。
 
+#### 7.2.1 文章自动同步（crontab，可选但强烈建议）
+
+文章入库不是自动的：**发了新文章、改了内容，RAG 里还是旧的**，必须跑一次
+`import_blog.py`。`deploy/rag-sync.sh` 就是给 cron 用的封装。
+
+```bash
+# 1) 放脚本 + 密码文件（密码不要写进 crontab，会出现在 ps 和 history 里）
+cd /opt/blog/rag/backend
+cp rag-sync.sh .sync.env.example .
+cp .sync.env.example .sync.env
+vi .sync.env                  # 填 BLOG_DB_PASSWORD=
+chmod 600 .sync.env
+chmod +x rag-sync.sh
+
+# 2) 先手动跑一次，别直接挂 cron
+./rag-sync.sh; echo "退出码 $?"
+tail -20 /opt/blog/logs/rag-sync.log
+#    正常应看到：[完成] 共 34 篇文章, 1055 个文本块已入库, 失败 0 篇
+
+# 3) 确认无误再挂定时（每天 3:00）
+crontab -e
+# 0 3 * * * /bin/bash /opt/blog/rag/backend/rag-sync.sh >/dev/null 2>&1
+crontab -l | grep rag-sync     # 回读确认
+```
+
+> - **全量重灌**而非增量：34 篇 / 1055 块约 1~2 分钟，成本可忽略，省掉一个会出错的状态机。
+>   `flock` 保证上一轮没跑完不会叠跑。
+> - 跑前先探 `/health?probe=1`：embedding 的 key 失效时直接 `[跳过]` 并记一行日志，
+>   避免白跑一轮再往日志里灌 34 条 failed。**看到 `[跳过]` 先查 `EMBEDDING_API_KEY`。**
+> - ⚠️ `/ingest-articles` 没有 prune：**已删除 / 转草稿的文章，旧块会留在库里**形成
+>   "幽灵引用"（AI 可能引用一篇已经打不开的文章）。要根治得给后端加 prune 接口。
+> - 重灌期间（1~2 分钟）检索可能命中半新半旧的数据，凌晨跑影响可忽略。
+
 ### 8. 部署前端
 
 前端是 **Nuxt SSR**：`nginx.conf` 的 `location /` 反代到 `127.0.0.1:3000`，

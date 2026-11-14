@@ -85,13 +85,13 @@ function goPage(p: number) {
 const canonicalUrl = computed(() => taxonomyCanonical('/tag', tag.value))
 
 useSeoMeta({
-  title: () => (tag.value ? `标签：${tag.value.name} - 好啵博客` : '标签文章 - 好啵博客'),
+  title: () => (tag.value ? `标签：${tag.value.name} - 博观` : '标签文章 - 博观'),
   description: () =>
     tag.value
-      ? `好啵博客中与「${tag.value.name}」相关的技术文章，共 ${tag.value.articleCount || total.value} 篇。`
-      : '按标签浏览好啵博客的技术文章。',
-  ogTitle: () => (tag.value ? `标签：${tag.value.name} - 好啵博客` : '标签文章 - 好啵博客'),
-  ogDescription: () => (tag.value ? `与「${tag.value.name}」相关的技术文章。` : '按标签浏览好啵博客的技术文章。'),
+      ? `博观中与「${tag.value.name}」相关的技术文章，共 ${tag.value.articleCount || total.value} 篇。`
+      : '按标签浏览博观的技术文章。',
+  ogTitle: () => (tag.value ? `标签：${tag.value.name} - 博观` : '标签文章 - 博观'),
+  ogDescription: () => (tag.value ? `与「${tag.value.name}」相关的技术文章。` : '按标签浏览博观的技术文章。'),
   ogUrl: () => canonicalUrl.value
 })
 useHead(() => ({ link: [{ rel: 'canonical', href: canonicalUrl.value }] }))

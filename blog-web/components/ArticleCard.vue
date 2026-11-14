@@ -16,7 +16,7 @@
           <span v-if="article.isTop" class="inline-block text-[10px] bg-primary-600 text-white px-1.5 py-0.5 rounded mr-1.5 align-middle font-medium">置顶</span><span v-html="hlTitle"></span>
         </h2>
         <div class="mt-3 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-auto pt-2">
-          <span>{{ article.createTime?.substring(0, 10) }}</span>
+          <span>{{ shownDate }}</span>
           <span>{{ article.viewCount }} 阅读</span>
           <span>{{ article.commentCount || 0 }} 评论</span>
         </div>
@@ -35,7 +35,7 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 text-xs text-gray-500 dark:text-gray-400">
-            <span>{{ article.createTime?.substring(0, 10) }}</span>
+            <span>{{ shownDate }}</span>
             <span class="opacity-40">·</span>
             <span>{{ article.wordCount || 0 }} 字</span>
             <span class="opacity-40">·</span>
@@ -71,11 +71,21 @@ import { ossImage, IMG_W } from '~/utils/image'
 import { highlightKeyword } from '~/utils/highlight'
 
 const props = withDefaults(defineProps<{
-  article: { id: number; title: string; slug?: string; summary: string; cover: string; isTop: number; viewCount: number; commentCount: number; createTime: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
+  article: { id: number; title: string; slug?: string; summary: string; cover: string; isTop: number; viewCount: number; commentCount: number; createTime: string; publishAt?: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
   layout?: 'list' | 'grid'
   /** 搜索结果页传当前关键词进来；为空时等同于原样输出（仍然会转义） */
   keyword?: string
 }>(), { layout: 'list', keyword: '' })
+
+/**
+ * 卡片上显示的日期 = 发布时间，没有就退回创建时间。
+ * 后端现在会给已发布文章保留 publish_at（用户选的发布时间），
+ * 历史文章是 NULL，于是自然回落到 create_time —— 两种数据都能正确显示。
+ */
+const shownDate = computed(() => {
+  const d = props.article.publishAt || props.article.createTime || ''
+  return d.substring(0, 10)
+})
 
 /** 标题走的是 v-html，所以必须无条件过一遍 escape —— 高亮与否都安全 */
 const hlTitle = computed(() => highlightKeyword(props.article.title, props.keyword))

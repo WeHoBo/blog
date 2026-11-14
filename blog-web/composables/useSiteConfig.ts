@@ -25,6 +25,14 @@ export interface SiteConfig {
   bloggerBio?: string
   /** 博主头像 URL */
   bloggerAvatar?: string
+  /** 横幅上的「关注方向」，英文逗号分隔 */
+  bloggerFocus?: string
+  /** AI 助手的展示名（悬浮球 tooltip、面板标题、欢迎语里的自称） */
+  aiName?: string
+  /** AI 面板的欢迎语 */
+  aiGreeting?: string
+  /** 问题池，JSON 数组字符串；为空时前台按最新文章自动生成 */
+  aiQuestions?: string
 }
 
 export const useSiteConfig = () => {

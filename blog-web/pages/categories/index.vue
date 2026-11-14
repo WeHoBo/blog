@@ -77,10 +77,10 @@ const categories = computed<TaxonomyItem[]>(() =>
 const tree = computed(() => buildCategoryTree(categories.value))
 
 useSeoMeta({
-  title: '文章分类 - 好啵博客',
-  description: '好啵博客的文章分类导航：按 Java、AI、操作系统、数据库、网络等分类浏览全部技术文章。',
-  ogTitle: '文章分类 - 好啵博客',
-  ogDescription: '按分类浏览好啵博客的全部技术文章。',
+  title: '文章分类 - 博观',
+  description: '博观的文章分类导航：按 Java、AI、操作系统、数据库、网络等分类浏览全部技术文章。',
+  ogTitle: '文章分类 - 博观',
+  ogDescription: '按分类浏览博观的全部技术文章。',
   ogUrl: `${SITE_URL}/categories`
 })
 useHead({ link: [{ rel: 'canonical', href: `${SITE_URL}/categories` }] })

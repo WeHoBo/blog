@@ -78,18 +78,24 @@ def split_text(
                 paragraphs.append({"text": para, "page": page_no})
 
     # 2) 贪心合并段落成接近 chunk_size 的块
+    # ⚠️ 合并目标必须用 body = chunk_size - chunk_overlap：第 3 步还会往每块开头
+    # 拼上 prev_tail（上一块尾部 chunk_overlap 字），拼完才是最终块。若这里直接用
+    # chunk_size，最终块会溢出到 chunk_size + chunk_overlap（实测 500+80=580），
+    # 而 embedding 服务对单条文本有 token 上限（bge-large-zh 为 512），一旦超出就
+    # 返回 400 / code 20015，整篇文章静默入不了库 —— 检索时永远搜不到它。
+    body = max(1, min(chunk_size, chunk_size - chunk_overlap))
     merged: list[dict[str, Any]] = []
     current_text, current_page = "", 0
     for para in paragraphs:
-        if len(current_text) + len(para["text"]) <= chunk_size:
+        if len(current_text) + len(para["text"]) <= body:
             current_text += para["text"]
             current_page = current_page or para["page"]
         else:
             if current_text:
                 merged.append({"text": current_text, "page": current_page})
-            if len(para["text"]) > chunk_size:
+            if len(para["text"]) > body:
                 # 段落过长：按句子细分后逐块加入
-                for seg in _split_long_paragraph(para["text"], chunk_size):
+                for seg in _split_long_paragraph(para["text"], body):
                     merged.append({"text": seg, "page": para["page"]})
                 current_text, current_page = "", 0
             else:
@@ -97,12 +103,20 @@ def split_text(
     if current_text:
         merged.append({"text": current_text, "page": current_page})
 
-    # 3) 相邻块之间补充重叠：把上一块尾部 chunk_overlap 字符拼到当前块开头
+    # 3) 相邻块之间补充重叠：把上一块尾部重叠字符拼到当前块开头。
+    # 拼的时候只取「本块还剩多少余量」那么多字符，保证最终长度 <= chunk_size；
+    # merged 里若有超长块（防御性分支），先按 chunk_size 硬切再补重叠。
     chunks: list[dict[str, Any]] = []
     prev_tail = ""
     for item in merged:
-        text = prev_tail + item["text"]
-        chunks.append({"text": text, "page": item["page"]})
+        base = item["text"]
+        while len(base) > chunk_size:
+            head, base = base[:chunk_size], base[chunk_size:]
+            chunks.append({"text": head, "page": item["page"]})
+            prev_tail = head[-chunk_overlap:] if len(head) > chunk_overlap else head
+        room = chunk_size - len(base)
+        tail = prev_tail[-room:] if room > 0 else ""
+        chunks.append({"text": tail + base, "page": item["page"]})
         # 记录当前块尾部，供下一块做重叠
-        prev_tail = item["text"][-chunk_overlap:] if len(item["text"]) > chunk_overlap else item["text"]
+        prev_tail = base[-chunk_overlap:] if len(base) > chunk_overlap else base
     return chunks
