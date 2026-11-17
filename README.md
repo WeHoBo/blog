@@ -1,4 +1,4 @@
-# 好啵博客
+# 博观
 
 个人技术博客 · https://codeup.asia
 
