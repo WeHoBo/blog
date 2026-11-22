@@ -277,6 +277,17 @@ async def run_tool(name: str, args: dict[str, Any], allowed: set[str] | None = N
     import asyncio
 
     if allowed is not None and name not in allowed:
+        # web_search 「不在本轮列表里」有两种完全不同的原因，必须分开说：
+        #   ① 压根没联网能力（没配 key）→ 模型多半是从历史消息里记住了这个名字，
+        #      说"不存在"，让它换路走；
+        #   ② 有联网能力、只是本轮次数用满 → 这里**绝不能**说"不存在"。
+        #      模型会以为自己名字打错了，然后连着换个措辞再试三次，
+        #      界面上就是一串黄色警告，用户以为站坏了。
+        #      实测（2026-11-22）就是这么表现的：一次问答刷出 3 条"不存在名为 web_search 的工具"。
+        if name == "web_search" and web_available():
+            return {"ok": False,
+                    "error": f"本轮联网搜索次数已用完（上限 {config.WEB_SEARCH_MAX_CALLS} 次）。"
+                             "请基于已经拿到的搜索结果直接作答，不要再调用 web_search。"}
         return {"ok": False, "error": f"不存在名为 {name} 的工具，请改用已提供的工具"}
 
     try:

@@ -249,10 +249,21 @@ def web_search_cases() -> None:
             assert key in prompt, f"{variant}版提示词缺少「{key}」"
     ok("两版都写明：工具报错就说「检索暂时不可用」，不许拿记忆冒充站内资料")
 
+    # 有联网能力、只是本轮没下发 → 必须说「次数用完」，不能说「不存在」。
+    # 说「不存在」模型会以为名字打错了，连着换个措辞再试三次 ——
+    # 2026-11-22 线上实测就是一次问答刷出 3 条黄色警告，用户以为站坏了。
     res = asyncio.run(agent_tools.run_tool("web_search", {"query": "x"}, {"search_knowledge", "site_stats"}))
     assert res.get("ok") is False, res
-    assert "不存在" in str(res.get("error")), res
-    ok("模型硬调未挂载的工具 → 被白名单挡下（不会返回「联网搜索不可用」让人一头雾水）")
+    assert "次数已用完" in str(res.get("error")), res
+    assert "不存在" not in str(res.get("error")), res
+    ok("联网次数用满 → 明确告知「次数已用完」，不误导成「工具不存在」")
+
+    # 真没配 key 时才该说「不存在」—— 这种多半是模型从历史消息里残留的名字
+    config.WEB_SEARCH_API_KEY = ""
+    res = asyncio.run(agent_tools.run_tool("web_search", {"query": "x"}, {"search_knowledge"}))
+    assert res.get("ok") is False and "不存在" in str(res.get("error")), res
+    ok("确实没有联网能力时 → 说「不存在」，让模型换路走")
+    config.WEB_SEARCH_API_KEY = "test-key"
 
     # ---------- 场景 8：单轮联网次数上限 ----------
     print("[8] 单轮联网次数上限")
