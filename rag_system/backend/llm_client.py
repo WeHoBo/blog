@@ -15,6 +15,7 @@ RAG 提示词也在本模块组装：指令 + 检索到的上下文片段 + 用�
 """
 import os
 import threading
+from datetime import datetime
 from typing import Any
 
 import model_registry
@@ -75,7 +76,7 @@ _RULES_NO_WEB = (
     "才说「站内资料里没有相关内容」，并简要说明你能基于站内资料回答什么。\n"
 )
 
-_PROMPT_HEAD = "你是「好啵博客」的站内 AI 助手，回答基于本站文章和作者上传的文档。\n工作原则：\n"
+_PROMPT_HEAD = "你是「博观」的站内 AI 助手，回答基于本站文章和作者上传的文档。\n工作原则：\n"
 
 _PROMPT_TAIL = (
     "回答要求：中文、Markdown、简洁有条理；不要提及工具名，也不要描述你的检索过程；"
@@ -90,17 +91,42 @@ _PROMPT_TAIL = (
 )
 
 
+def _now_stamp() -> str:
+    """
+    当前时间锚点，拼在提示词**最末尾**。
+
+    为什么必须有它：模型的训练数据有截止日期，它不知道"今天"是哪天。少了这一句，
+    「今天几号」答不了，更要命的是「这篇是多久前发的」「最近有什么新文章」这类问题
+    会拿训练数据里的年份当"现在"，把旧内容说成最近 —— 而且说得很有把握。
+
+    ⚠️ 为什么放在**末尾**而不是开头：DeepSeek / 智谱都支持提示词前缀缓存，
+    动态内容放前面会让整段缓存每天失效一次；放末尾则前面那一大段固定规则照常命中。
+    """
+    now = datetime.now()
+    return (
+        f"\n\n【当前时间】今天是 {now:%Y-%m-%d}（星期{'一二三四五六日'[now.weekday()]}）。"
+        "涉及「今天」「最近」「多久前」「今年」这类时间概念时，一律以此为准，"
+        "不要用训练数据里的日期去推断当前日期。"
+    )
+
+
 def system_prompt(web_available: bool) -> str:
     """
     拼系统提示词。
 
     联网规则按 `web_available` 分支：没有联网能力时，提示词里连 web_search 这个名字都不出现，
     从源头上断掉"模型凭名字硬调一个未挂载工具"这条路。
+
+    每次调用都重新取当前时间（不是模块级常量），所以跨天不用重启进程。
     """
-    return _PROMPT_HEAD + _RULES_BASE + (_RULES_WEB if web_available else _RULES_NO_WEB) + _PROMPT_TAIL
+    return (_PROMPT_HEAD + _RULES_BASE
+            + (_RULES_WEB if web_available else _RULES_NO_WEB)
+            + _PROMPT_TAIL + _now_stamp())
 
 
-# 兼容旧引用（自测与文档按这个名字找）：默认取"具备联网能力"的那一版
+# 兼容旧引用（自测与文档按这个名字找）：默认取"具备联网能力"的那一版。
+# ⚠️ 这是**模块导入那一刻**的快照，里面的【当前时间】会过时 —— 别拿它当会话提示词用，
+#    实际问答走的是 agent.py 里的 `system_prompt(web_available)`，每次都重新取时间。
 AGENT_SYSTEM_PROMPT = system_prompt(True)
 
 

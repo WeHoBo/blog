@@ -207,6 +207,9 @@ def web_search_cases() -> None:
     config.WEB_SEARCH_ENABLED = True
     config.WEB_SEARCH_PROVIDERS = ["tavily", "bocha"]
     config.WEB_SEARCH_API_KEY = ""
+    # 关掉智谱 key 自动复用：否则本机如果正好起了 Java 且配了智谱，
+    # 「无密钥 → 工具不挂载」这条断言就会随机失败（取决于 Java 起没起）
+    config.WEB_SEARCH_ZHIPU_AUTOKEY = False
 
     # ---------- 场景 7：没有密钥时工具根本不挂载 ----------
     print("[7] 无密钥时不挂载 web_search")
@@ -398,10 +401,19 @@ def http_case(web_search) -> None:
                 self.end_headers()
                 self.wfile.write(b'{"error":"upstream"}')
                 return
-            payload = {"results": [
-                {"title": "HTTP 返回的标题", "url": "https://www.example.net/post/1",
-                 "content": "HTTP 返回的摘要", "published_date": "2026-11-10"},
-            ]}
+            # 智谱与 tavily 的**响应结构完全不同**（search_result/link/content
+            # vs results/url/content），字段映射写错会得到一堆空标题且不报错，
+            # 所以假服务必须按请求形态回对应格式，才能真的测出映射对不对。
+            if "search_query" in captured["body"]:
+                payload = {"search_result": [
+                    {"title": "智谱返回的标题", "link": "https://www.bigmodel.cn/doc/x",
+                     "content": "智谱返回的摘要", "publish_date": "2026-11-20"},
+                ]}
+            else:
+                payload = {"results": [
+                    {"title": "HTTP 返回的标题", "url": "https://www.example.net/post/1",
+                     "content": "HTTP 返回的摘要", "published_date": "2026-11-10"},
+                ]}
             raw = json.dumps(payload, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -418,6 +430,8 @@ def http_case(web_search) -> None:
 
     old_base = os.environ.get("WEB_SEARCH_BASE_URL_TAVILY")
     os.environ["WEB_SEARCH_BASE_URL_TAVILY"] = f"http://127.0.0.1:{port}/search"
+    old_base_zhipu = os.environ.get("WEB_SEARCH_BASE_URL_ZHIPU")
+    os.environ["WEB_SEARCH_BASE_URL_ZHIPU"] = f"http://127.0.0.1:{port}/web_search"
     # 上一个场景把 _PROVIDERS 换成了假函数，这里要换回真实现 ——
     # 本场景的目的恰恰是验证真实的 requests 调用
     web_search._PROVIDERS["tavily"] = web_search._call_tavily
@@ -445,12 +459,84 @@ def http_case(web_search) -> None:
         res2 = web_search.search("boom", 3)
         assert res2["ok"] is False and "tavily" in res2["error"], res2
         ok("上游非 200 时如实失败，错误里带 provider 名便于排障")
+
+        # ---------- 场景 11.5：智谱 provider 的字段映射 ----------
+        print("[11.5] 智谱搜索 provider（与对话共用同一把 key）")
+        config.WEB_SEARCH_PROVIDERS = ["zhipu"]
+        config.WEB_SEARCH_API_KEY = "k-123"
+        web_search.clear_cache()
+        res3 = web_search.search("智谱查询", 3)
+        assert res3["ok"] is True, res3
+        zitem = res3["data"]["items"][0]
+        assert zitem["title"] == "智谱返回的标题", zitem
+        assert zitem["domain"] == "bigmodel.cn", zitem
+        assert zitem["publishedAt"] == "2026-11-20", zitem
+        ok("智谱响应解析正确（search_result/link/content 映射没写错）")
+
+        assert captured["body"].get("search_query") == "智谱查询", captured
+        assert captured["body"].get("search_engine") == "search_std", captured
+        assert captured["body"].get("search_intent") is True, captured
+        assert captured["auth"] == "Bearer k-123", captured
+        ok("请求体字段名与鉴权头正确（智谱用 search_query + Bearer）")
+
+        # 中国区 OpenAPI 对 search_query 限长 70：不自己截就是稳定 400
+        web_search.clear_cache()
+        web_search.search("长" * 200, 3)
+        assert len(captured["body"].get("search_query") or "") == 70, captured
+        ok("超长搜索词被截到 70 字符（中国区硬限制，不截就 400）")
+
+        # ---------- 场景 11.6：没单独配搜索 key 时自动复用智谱对话 key ----------
+        print("[11.6] 智谱 key 自动复用（只在对话模型确实跑在智谱上时）")
+        import model_registry
+
+        origin_active = model_registry.active_model
+        origin_resolve = model_registry.resolve_api_key
+        os.environ.pop("WEB_SEARCH_API_KEY_ZHIPU", None)
+        os.environ.pop("ZHIPU_API_KEY", None)
+        config.WEB_SEARCH_API_KEY = ""
+        config.WEB_SEARCH_ZHIPU_AUTOKEY = True
+        try:
+            model_registry.active_model = lambda: {
+                "modelId": "glm-4.5-air",
+                "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "apiKey": "zhipu-k",
+            }
+            model_registry.resolve_api_key = lambda cfg: cfg.get("apiKey") or ""
+            assert web_search._key_for("zhipu") == "zhipu-k"
+            ok("对话模型在智谱上 → 直接复用那把 key（不用再买搜索服务）")
+
+            # 换成 DeepSeek 时绝不能复用：拿 DeepSeek 的 key 去打智谱接口稳定 401，
+            # 而且这种 401 特别难查 —— 看起来"配了"，实际配的是别人家的凭据
+            model_registry.active_model = lambda: {
+                "modelId": "deepseek-chat",
+                "baseUrl": "https://api.deepseek.com",
+                "apiKey": "ds-k",
+            }
+            assert web_search._key_for("zhipu") == ""
+            ok("对话模型不在智谱上 → 不复用（避免拿别家 key 撞 401）")
+
+            config.WEB_SEARCH_ZHIPU_AUTOKEY = False
+            model_registry.active_model = lambda: {
+                "modelId": "glm-4.5-air",
+                "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "apiKey": "zhipu-k",
+            }
+            assert web_search._key_for("zhipu") == ""
+            ok("AUTOKEY=0 → 彻底关掉自动复用（自测和生产排障都要这个开关）")
+        finally:
+            model_registry.active_model = origin_active
+            model_registry.resolve_api_key = origin_resolve
+            config.WEB_SEARCH_ZHIPU_AUTOKEY = False
     finally:
         server.shutdown()
         if old_base is None:
             os.environ.pop("WEB_SEARCH_BASE_URL_TAVILY", None)
         else:
             os.environ["WEB_SEARCH_BASE_URL_TAVILY"] = old_base
+        if old_base_zhipu is None:
+            os.environ.pop("WEB_SEARCH_BASE_URL_ZHIPU", None)
+        else:
+            os.environ["WEB_SEARCH_BASE_URL_ZHIPU"] = old_base_zhipu
 
 
 def _fake_async_tool(result):

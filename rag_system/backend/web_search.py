@@ -109,9 +109,46 @@ def domain_of(url: str) -> str:
 # provider 实现
 # ------------------------------------------------------------------
 
+def _zhipu_key() -> str:
+    """
+    智谱的 key 比别家多一层来源：还能直接复用「当前对话模型」那把。
+
+    为什么值得这么做：智谱的对话和搜索是**同一个账户、同一把 key**。
+    已经买过 GLM 的人再被要求去注册一个搜索服务，纯属浪费钱和时间。
+    但只在 baseUrl 确实指向智谱时才复用 —— 否则等于拿 DeepSeek 的 key
+    去请求智谱接口，稳定 401，而且是那种"看起来配了却没生效"的难查故障。
+    """
+    import os
+
+    explicit = (os.getenv("WEB_SEARCH_API_KEY_ZHIPU", "").strip()
+                or os.getenv("ZHIPU_API_KEY", "").strip()
+                or config.WEB_SEARCH_API_KEY)
+    if explicit:
+        return explicit
+
+    if not config.WEB_SEARCH_ZHIPU_AUTOKEY:
+        return ""
+
+    try:
+        import model_registry
+
+        cfg = model_registry.active_model() or {}
+        if "bigmodel.cn" not in (cfg.get("baseUrl") or ""):
+            return ""
+        return model_registry.resolve_api_key(cfg)
+    except Exception as e:
+        # 配置中心不可用不能把搜索一起拖下水：返回空 = 跳过 zhipu，
+        # 由降级链继续试下一个 provider
+        print(f"[WebSearch] 智谱 key 自动复用失败（跳过）: {e}")
+        return ""
+
+
 def _key_for(provider: str) -> str:
     """provider 专属 key 优先，回落到全局 key。"""
     import os
+
+    if provider == "zhipu":
+        return _zhipu_key()
 
     specific = os.getenv(f"WEB_SEARCH_API_KEY_{provider.upper()}", "").strip()
     return specific or config.WEB_SEARCH_API_KEY
@@ -121,6 +158,7 @@ def _key_for(provider: str) -> str:
 # 单 provider 部署也可以直接用全局 WEB_SEARCH_BASE_URL（多 provider 时它会作用到每一个，
 # 所以那种情况请用带后缀的那个）。
 _DEFAULT_ENDPOINT = {
+    "zhipu": "https://open.bigmodel.cn/api/paas/v4/web_search",
     "tavily": "https://api.tavily.com/search",
     "bocha": "https://api.bochaai.com/v1/web-search",
 }
@@ -182,7 +220,46 @@ def _call_bocha(query: str, limit: int, key: str) -> list[dict]:
     return out
 
 
+def _call_zhipu(query: str, limit: int, key: str) -> list[dict]:
+    """
+    智谱独立搜索接口。和对话接口共用一把 key、一个账户余额，按次计费。
+
+    ⚠️ 中国区 OpenAPI 对 search_query 限长 70 字符 —— 超长直接 400。
+    我们的 QUERY_MAX 是 200，所以这里必须自己截，不能指望上游。
+    ⚠️ 返回字段是 search_result / link / content，与 tavily/bocha 完全不同的命名，
+    映射错了会得到一堆空标题（而且不报错），所以自测里专门断言了字段。
+    """
+    resp = requests.post(
+        _endpoint("zhipu"),
+        json={
+            "search_query": query[:70],
+            "search_engine": config.WEB_SEARCH_ENGINE_ZHIPU,
+            # 当前 OpenAPI 要求必填；开启后智谱会先改写关键词再搜，中文效果更好
+            "search_intent": True,
+            "count": max(1, min(10, int(limit))),
+            "content_size": "medium",
+            "search_recency_filter": "noLimit",
+        },
+        timeout=config.WEB_SEARCH_TIMEOUT,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {key}"},
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"zhipu HTTP {resp.status_code}")
+    data = resp.json() or {}
+    out = []
+    for r in (data.get("search_result") or [])[:limit]:
+        out.append({
+            "title": r.get("title") or "",
+            "url": r.get("link") or "",
+            "snippet": r.get("content") or "",
+            "publishedAt": r.get("publish_date") or "",
+        })
+    return out
+
+
 _PROVIDERS = {
+    "zhipu": _call_zhipu,
     "tavily": _call_tavily,
     "bocha": _call_bocha,
 }

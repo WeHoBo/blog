@@ -90,17 +90,33 @@ AGENT_TOOLS_ENABLED = os.getenv("AGENT_TOOLS_ENABLED", "1") != "0"
 # 也就不会为了一个注定失败的调用白花 token。
 WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "1") != "0"
 
-# provider 顺序即降级链（逗号分隔）。目前支持：tavily、bocha（博查）。
+# provider 顺序即降级链（逗号分隔）。支持：zhipu（智谱）、tavily、bocha（博查）。
+# 默认把 zhipu 排第一：智谱的搜索接口和对话共用同一把 key，
+# 已经买过 GLM 的人不用再单独买搜索服务（¥0.01/次，见 WEB_SEARCH_ENGINE_ZHIPU）。
 WEB_SEARCH_PROVIDERS = [
     p.strip().lower()
-    for p in os.getenv("WEB_SEARCH_PROVIDERS", "tavily,bocha").split(",")
+    for p in os.getenv("WEB_SEARCH_PROVIDERS", "zhipu,tavily,bocha").split(",")
     if p.strip()
 ]
 
-# 全局密钥。若多个 provider 各用不同 key，可另配 WEB_SEARCH_API_KEY_TAVILY /
-# WEB_SEARCH_API_KEY_BOCHA，优先于这个值。
+# 全局密钥。若多个 provider 各用不同 key，可另配 WEB_SEARCH_API_KEY_ZHIPU /
+# WEB_SEARCH_API_KEY_TAVILY / WEB_SEARCH_API_KEY_BOCHA，优先于这个值。
 # **留空 = 不启用联网搜索**（工具不挂载），而不是挂一个每次都失败的摆设。
 WEB_SEARCH_API_KEY = os.getenv("WEB_SEARCH_API_KEY", "").strip()
+
+# 智谱用的搜索引擎档位。价格差 5 倍，别默认用贵的：
+#   search_std         ¥0.01/次  自研基础，个人博客够用
+#   search_pro         ¥0.03/次  召回更高
+#   search_pro_sogou   ¥0.05/次  搜狗，国内内容覆盖好
+#   search_pro_quark   ¥0.05/次  夸克，时效性强
+WEB_SEARCH_ENGINE_ZHIPU = os.getenv("WEB_SEARCH_ENGINE_ZHIPU", "search_std").strip()
+
+# ⭐ 智谱 key 自动复用：没单独配搜索 key 时，尝试用「当前对话模型」的 key。
+#   成立的前提是对话模型本身就跑在智谱上（baseUrl 含 bigmodel.cn）——
+#   同一个智谱账户，对话和搜索共用一把 key、共用余额。
+#   为什么要有这个开关：单元测试里必须关掉，否则本机起了 Java 就会让
+#   「无密钥 → 工具不挂载」这条断言随机失败。
+WEB_SEARCH_ZHIPU_AUTOKEY = os.getenv("WEB_SEARCH_ZHIPU_AUTOKEY", "1") != "0"
 
 # 单个 provider 的超时。设计文档要求 3 秒 —— 搜索是"锦上添花"，
 # 为了它把整个回答拖慢到十几秒，用户体感是"AI 卡住了"。
