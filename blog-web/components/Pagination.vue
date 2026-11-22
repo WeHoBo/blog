@@ -1,6 +1,7 @@
 ﻿<template>
-  <div v-if="total > 1" class="flex items-center justify-center gap-1 mt-8 text-sm flex-wrap">
-    <button :disabled="current <= 1" @click="$emit('change', 1)" aria-label="第一页"
+  <div v-if="total > 1" class="flex items-center justify-center gap-1 text-sm flex-wrap"
+    :class="compact ? 'mt-4' : 'mt-8'">
+    <button v-if="!compact" :disabled="current <= 1" @click="$emit('change', 1)" aria-label="第一页"
       class="px-2 py-1.5 rounded border disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 transition">首页</button>
     <button :disabled="current <= 1" @click="$emit('change', current - 1)" aria-label="上一页"
       class="px-3 py-1.5 rounded border disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 transition">上一页</button>
@@ -16,19 +17,26 @@
 
     <button :disabled="current >= total" @click="$emit('change', current + 1)" aria-label="下一页"
       class="px-3 py-1.5 rounded border disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 transition">下一页</button>
-    <button :disabled="current >= total" @click="$emit('change', total)" aria-label="最后一页"
+    <button v-if="!compact" :disabled="current >= total" @click="$emit('change', total)" aria-label="最后一页"
       class="px-2 py-1.5 rounded border disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 transition">末页</button>
 
-    <span class="text-gray-400 ml-2 mr-1">共 {{ total }} 页</span>
-    <span class="text-gray-400">跳至</span>
-    <input v-model="jumpPage" @keyup.enter="doJump" type="number" :min="1" :max="total" aria-label="跳转到页码"
-      class="w-14 px-2 py-1.5 border rounded text-center dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-primary-500" />
-    <button @click="doJump" class="px-2 py-1.5 bg-primary-600 text-white rounded text-xs hover:bg-primary-700 transition" aria-label="跳转">GO</button>
+    <!-- 页码跳转与「共 N 页」在窄栏里会挤成三四行，compact 模式直接省掉，
+         只留上一页 / 页码 / 下一页 -->
+    <template v-if="!compact">
+      <span class="text-gray-400 ml-2 mr-1">共 {{ total }} 页</span>
+      <span class="text-gray-400">跳至</span>
+      <input v-model="jumpPage" @keyup.enter="doJump" type="number" :min="1" :max="total" aria-label="跳转到页码"
+        class="w-14 px-2 py-1.5 border rounded text-center dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-primary-500" />
+      <button @click="doJump" class="px-2 py-1.5 bg-primary-600 text-white rounded text-xs hover:bg-primary-700 transition" aria-label="跳转">GO</button>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{ current: number; total: number }>()
+const props = withDefaults(defineProps<{ current: number; total: number; compact?: boolean }>(), {
+  // 窄容器（首页右栏 400px）用紧凑版：省略首页/末页/跳转
+  compact: false
+})
 const emit = defineEmits<{ change: [page: number] }>()
 
 const jumpPage = ref(props.current)

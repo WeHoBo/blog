@@ -86,6 +86,11 @@
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
                 管理后台
               </NuxtLink>
+              <!-- 投稿作者：只进 /author，不进 /admin（那边 37 个接口都跟他无关） -->
+              <NuxtLink v-if="authStore.isAuthor" to="/author" @click="userOpen = false" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                我的文章
+              </NuxtLink>
               <!-- 「设置」入口已移除：和顶栏调色板按钮完全重复，留一个就够 -->
               <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
               <button @click="handleLogout" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
@@ -121,6 +126,7 @@
     <div v-if="mobileOpen" class="lg:hidden border-t dark:border-gray-700 py-3 space-y-1 pb-4 px-4">
       <NuxtLink to="/" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">首页</NuxtLink>
       <NuxtLink v-if="authStore.isAdmin" to="/admin/articles" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">管理后台</NuxtLink>
+      <NuxtLink v-if="authStore.isAuthor" to="/author" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">我的文章</NuxtLink>
       <NuxtLink to="/about" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">关于</NuxtLink>
       <NuxtLink to="/archive" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">归档</NuxtLink>
       <NuxtLink to="/categories" @click="mobileOpen = false" class="block px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">分类</NuxtLink>
@@ -219,15 +225,17 @@
                 </button>
               </div>
 
-              <!-- 文章布局 -->
+              <!-- 首页布局：只切中间那栏（列表 / 网格）。右侧「全部文章」固定列表形态。
+                   （原来的「列表/网格」是给旧首页中栏用的，旧中栏已改成置顶滚动屏，
+                    那个开关会变成点了没反应的死控件，这里换成同一个概念的新控件） -->
               <div class="flex items-center justify-between py-2">
                 <span class="flex items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-200">
                   <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="18" height="7" rx="1"/></svg>
-                  文章布局
+                  首页布局
                 </span>
                 <div class="flex items-center gap-1 bg-gray-50 dark:bg-white/5 rounded-full p-1 border border-gray-300 dark:border-gray-700">
-                  <button @click="setLayout('list')" class="px-3 py-1 rounded-full text-xs transition" :class="layout === 'list' ? 'bg-primary-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'">列表</button>
-                  <button @click="setLayout('grid')" class="px-3 py-1 rounded-full text-xs transition" :class="layout === 'grid' ? 'bg-primary-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'">网格</button>
+                  <button @click="setHomeSwap(false)" class="px-3 py-1 rounded-full text-xs transition" :class="!homeSwapped ? 'bg-primary-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'">默认</button>
+                  <button @click="setHomeSwap(true)" class="px-3 py-1 rounded-full text-xs transition" :class="homeSwapped ? 'bg-primary-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'">互换</button>
                 </div>
               </div>
 
@@ -366,7 +374,7 @@ const currentWallpaperHint = computed(() => {
   return '不显示主图，只保留纸张底色'
 })
 
-const { viewMode: layout, setViewMode: setLayout, sortMode: sort, setSortMode: setSort } = useLayout()
+const { sortMode: sort, setSortMode: setSort, homeSwapped, setHomeSwap } = useLayout()
 
 function doSearch() {
   mobileOpen.value = false

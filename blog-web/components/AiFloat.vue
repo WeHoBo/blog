@@ -1,32 +1,23 @@
 <template>
   <div>
-    <!-- 首次提示气泡 -->
-    <Transition name="ai-pop">
-      <div v-if="showHint && !open" class="fixed bottom-24 right-6 z-[65] bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 px-4 py-3 text-sm max-w-[200px] relative">
-        <button @click="dismissHint" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-300 flex items-center justify-center text-xs hover:bg-gray-300 dark:hover:bg-gray-500 transition">✕</button>
-        <div class="font-medium text-gray-800 dark:text-gray-200 mb-0.5">👋 你好！</div>
-        <p class="text-gray-500 dark:text-gray-400 text-xs leading-relaxed">有问题可以问我，我能根据本站技术文章帮你解答 🤖</p>
-      </div>
-    </Transition>
+    <!-- AI 助手入口：右下角的「角色」。
+         原来是 56×56 的渐变圆按钮，2026-11-17 起换成能表达聊天状态的小鱼
+         （在思考 / 在查资料 / 在出字 / 答完了 / 失败 / 打盹）。
 
-    <!-- 悬浮按钮 -->
-    <button v-if="!open" @click="toggle"
-      class="fixed bottom-6 right-6 z-[65] w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/30 hover:-translate-y-0.5 active:scale-95 transition-all duration-200 flex items-center justify-center group">
-      <svg v-if="!streaming" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="1.8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8V4m0 0l-2 2m2-2l2 2"/><circle cx="9" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="13" r="1" fill="currentColor" stroke="none"/><path stroke-linecap="round" stroke-width="1.5" d="M9.5 16.5h5"/></svg>
-      <span v-else class="flex gap-1.5">
-        <span class="w-1.5 h-1.5 bg-white/90 rounded-full animate-bounce"></span>
-        <span class="w-1.5 h-1.5 bg-white/60 rounded-full animate-bounce" style="animation-delay:.15s"></span>
-        <span class="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style="animation-delay:.3s"></span>
-      </span>
-      <span class="absolute right-full mr-3 px-2.5 py-1 rounded-lg bg-gray-900 dark:bg-gray-700 text-white text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">{{ aiName }}</span>
-    </button>
-
-    <!-- 聊天窗口 -->
-    <Teleport to="body">
-      <Transition name="ai-window">
-        <div v-if="open"
-          class="ai-panel fixed z-[80] bottom-4 right-4 sm:bottom-6 sm:right-6 max-h-[85vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 flex flex-col overflow-hidden"
-          :style="panelStyle">
+         P2：面板不再 Teleport 到 body，而是通过 slot 塞进 CompanionEntry 的容器里。
+         这样拖拽容器时面板自动跟随，不用每帧算面板坐标；
+         面板的位置（立绘左上）也只由 CSS 决定，没有 JS 参与就不会抖。 -->
+    <CompanionEntry
+      :open="open"
+      :panel-w="size.w"
+      :panel-h="size.h"
+      @activate="toggle"
+    >
+      <template #panel>
+        <Transition name="ai-window">
+          <div v-if="open"
+            class="ai-panel relative max-h-[85vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 flex flex-col overflow-hidden"
+            :style="panelStyle">
           <!-- 左上角拖拽把手：面板贴右下角，所以「变大」是往左上拉。
                只在桌面端出现 —— 手机上窗口是全宽底部抽屉，改了宽度反而更难用。 -->
           <div class="hidden sm:flex absolute top-0 left-0 z-10 w-5 h-5 items-start justify-start cursor-nwse-resize group"
@@ -188,10 +179,17 @@
               </button>
             </div>
             <p class="text-[10px] text-gray-300 dark:text-gray-600 mt-1.5 text-center">AI 基于本站文章回答，联网时含第三方网页内容，可能有误，请核对原文</p>
+            <!-- 形象署名：右下角立绘用的「大肥鱼（DeepSeek-chan）」免费公皮，
+                 作者的使用须知要求公开使用时注明来源，这行不能删。
+                 换形象时记得一起改。 -->
+            <p class="text-[10px] text-gray-300 dark:text-gray-600 mt-1 text-center">
+              形象：大肥鱼 · 原画/拆分 神宫凉子 · 建模 霓虹猫_NeonNeko
+            </p>
           </div>
-        </div>
-      </Transition>
-    </Teleport>
+          </div>
+        </Transition>
+      </template>
+    </CompanionEntry>
   </div>
 </template>
 
@@ -203,6 +201,63 @@ import { buildQuickQuestions, parseQuestionPool, pickQuestions, shuffle, type Qu
 // 解构出顶层 ref —— 模板中 ref 自动解包，v-model 才能正确读写字符串
 const { open, toggle, close, messages, input, streaming, clear, stop, ask, quota } = useAiChat()
 const { get } = useApi()
+
+/* ─────────────────────────────────────────────────────────────
+   入口动效接线：把聊天状态「映射」成小鱼的状态
+
+   原则：**只读不写**。这段代码不改变任何聊天行为，只是把已经存在的
+   `streaming` / `msg.phase` / `msg.steps` / `msg.content` 翻译成视觉状态，
+   交给 useCompanionState 那一个状态机。所以哪怕哪天把入口整个删掉，
+   聊天也照常工作 —— 反过来才安全。
+   ───────────────────────────────────────────────────────────── */
+const { applyDerived } = useCompanionState()
+
+/** 最后一条助手回复：入口只看这一条 */
+const lastReply = computed(() => {
+  const last = messages.value[messages.value.length - 1]
+  return last && last.role === 'assistant' ? last : null
+})
+
+/**
+ * 请求进行中的派生状态。顺序即优先级：
+ *   有工具在跑 → tools（拿工具名，气泡会说「正在查：xxx」）
+ *   有 status 阶段 → thinking（"正在检索…""正在整理…"这类）
+ *   已经在出字 → typing
+ *   都还没有 → thinking
+ */
+const busyPhase = computed<string | null>(() => {
+  if (!streaming.value) return null
+  const m = lastReply.value
+  if (!m) return 'thinking'
+  const running = (m.steps || []).find((s: any) => s.state === 'start')
+  if (running) return `tools:${running.name || ''}`
+  if (m.phase) return 'thinking'
+  if (m.content) return 'typing'
+  return 'thinking'
+})
+
+/**
+ * 只在面板**关着**时才把状态推给入口。
+ * 面板打开时小鱼是隐藏的（被 z-80 的窗口压着），推过去也看不见，
+ * 反而会让「关掉面板后回到 idle」和「关掉面板时其实还在出字」这两种情况打架。
+ */
+watch(
+  () => (open.value ? null : busyPhase.value),
+  (v) => {
+    if (!v) return
+    if (v.startsWith('tools:')) applyDerived('tools', v.slice(6))
+    else applyDerived(v as 'thinking' | 'typing')
+  },
+)
+
+/** streaming 由 true → false：这一轮结束，看结果决定 done 还是 error */
+watch(streaming, (now, before) => {
+  if (!before || now || open.value) return
+  const m = lastReply.value
+  // 没有正文、或正文里带 ⚠️（useAiChat 的 error 分支就是往 content 里追加 ⚠️）
+  const failed = !m || !m.content || m.content.includes('⚠️')
+  applyDerived(failed ? 'error' : 'done')
+})
 
 /**
  * 站外来源的可用 URL。
@@ -382,17 +437,11 @@ function startResize(e: PointerEvent) {
   window.addEventListener('pointerup', up)
 }
 
-const showHint = ref(false)
-function dismissHint() {
-  showHint.value = false
-  if (process.client) localStorage.setItem('ai-hint-dismissed', '1')
-}
+/* 首次招呼拆到 CompanionEntry 里了：入口换成了角色，招呼自然跟着角色走，
+   而且「一天一次」比「永久只弹一次」更适合一个会动的新入口。 */
 
 onMounted(() => {
   loadPanelSize()
-  if (process.client && !localStorage.getItem('ai-hint-dismissed')) {
-    setTimeout(() => { showHint.value = true }, 2500)
-  }
 })
 
 // 外部触发（如文章页）打开时自动滚底
@@ -402,7 +451,6 @@ watch(open, (v) => {
     setTimeout(() => {
       if (bodyEl.value) bodyEl.value.scrollTop = bodyEl.value.scrollHeight
     }, 50)
-    dismissHint()
   }
 })
 
@@ -420,7 +468,12 @@ function sendInput() {
    可能被 JIT 扫不到（生成不出来就是桌面端全宽），CSS 变量写法没有这个不确定性。 */
 .ai-panel {
   width: var(--ai-w, 400px);
-  height: var(--ai-h, 580px);
+  /* 面板从立绘左上展开，所以可用高度 = 立绘顶部到视口顶。
+     `--dock-y` 由 CompanionEntry 透出来（它会随拖拽实时变）。
+     不加这个上限，视口一矮面板就从屏幕顶部冲出去 ——
+     实测 860 高的视口里，立绘一旦离开最底部，面板顶就已经到 y=-94。
+     下限 220 是保底：立绘被拖到最顶上时至少留一点可见，总比整块消失好。 */
+  height: max(220px, min(var(--ai-h, 580px), calc(var(--dock-y, 900px) - 32px)));
 }
 @media (max-width: 639px) {
   .ai-panel {
@@ -447,6 +500,4 @@ function sendInput() {
 .ai-window-enter-active { transition: opacity .2s ease, transform .2s ease; }
 .ai-window-leave-active { transition: opacity .15s ease, transform .15s ease; }
 .ai-window-enter-from, .ai-window-leave-to { opacity: 0; transform: translateY(12px) scale(.97); }
-.ai-pop-enter-active, .ai-pop-leave-active { transition: opacity .3s ease, transform .3s ease; }
-.ai-pop-enter-from, .ai-pop-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

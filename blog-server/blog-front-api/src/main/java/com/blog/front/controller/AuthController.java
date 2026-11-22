@@ -23,7 +23,9 @@ public class AuthController {
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        return Result.ok(new LoginVO(null, user.getId(), user.getUsername(), user.getNickname(), user.getAvatar(), user.getBio(), user.getRole()));
+        // 用 LoginVO.of 统一构造：新增 phone / passwordSet 字段后，
+        // 靠手写参数列表容易漏字段，且编译器不会报错（同类型参数太多）
+        return Result.ok(LoginVO.of(user, null));
     }
 
     @PutMapping("/profile")

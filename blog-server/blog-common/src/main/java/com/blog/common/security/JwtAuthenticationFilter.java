@@ -43,6 +43,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(userId, null, authorities);
             SecurityContextHolder.getContext().setAuthentication(authentication);
+            // 给访问日志用：访问日志过滤器在 Security 链的外层，等 chain.doFilter 返回时
+            // SecurityContext 已被清空，直接读 Authentication 一定是 null。
+            // 请求对象活到最后，所以把 userId 挂到 request attribute 上。
+            // （blog-common 不依赖 front-api，故此处用字面量，与 ApiAccessLogFilter.UID_ATTR 保持一致）
+            request.setAttribute("blog.uid", userId);
         }
         filterChain.doFilter(request, response);
     }
@@ -57,6 +62,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * 超管天然拥有管理员的全部能力，只有我们显式改成 {@code hasRole('super')} 的地方才收窄。
      *
      * <p>注意：这个是**单向**的，{@code admin} 永远拿不到 {@code ROLE_super}。
+     *
+     * <p><b>{@code author} 恰恰相反，只拿 {@code ROLE_author}</b>（走下面的通用分支）。
+     * 这是「投稿作者」角色：能提交文章、只能改自己的文章，其余全部收窄。
+     * 🔴 绝不能为了让作者"能用后台"而给他补 {@code ROLE_admin} ——
+     * 那样一来 37 个管理员接口会全部对他敞开，包括改站点设置和删别人的文章，
+     * 整套审核制就形同虚设。
      */
     private List<GrantedAuthority> authoritiesOf(String role) {
         String r = StrUtil.blankToDefault(role, "user");

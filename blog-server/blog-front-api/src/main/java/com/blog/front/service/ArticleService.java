@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blog.common.constant.CategoryConstants;
 import com.blog.common.dto.ArticleDTO;
+import com.blog.common.dto.AuthorArticleDTO;
 import com.blog.common.entity.Article;
 import com.blog.common.entity.ArticleRevision;
 import com.blog.common.entity.ArticleTag;
@@ -23,8 +24,11 @@ import com.blog.front.util.DocxToMdUtil;
 import com.blog.front.util.FrontMatter;
 import com.blog.front.util.WordCounter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -43,6 +47,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ArticleService {
 
     /** 单篇文章最多保留的历史版本数，超出即淘汰最旧的 */
@@ -76,10 +81,37 @@ public class ArticleService {
     // 列表 / 详情
     // =================================================================
 
+    /** 兼容旧调用方：不关心「精品 / 置顶」两个维度时用这个重载（归档/分类/标签/检索工具都走它） */
     public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword, List<Long> categoryIds, String sort) {
+        return page(pageNum, pageSize, categoryId, tagId, keyword, categoryIds, sort, null, null);
+    }
+
+    /** 只按精品维度过滤（保留给「精品」相关查询，首页已改用置顶维度） */
+    public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword,
+                              List<Long> categoryIds, String sort, Integer featured) {
+        return page(pageNum, pageSize, categoryId, tagId, keyword, categoryIds, sort, featured, null);
+    }
+
+    /**
+     * 公开文章分页。
+     *
+     * @param featured 精品（精品）过滤：1 只取 / 0 排除 / null 不限。**首页不再用它**，
+     *                 现在它只在后台与「精品」徽标相关的地方出现。
+     * @param top      置顶过滤：1 只取置顶 / 0 排除置顶 / null 不限。
+     *                 首页靠它分工：中间那栏取 {@code 1}，右侧「全部文章」取 {@code 0} ——
+     *                 置顶文章只在中间出现一次，右侧不重复展示。
+     */
+    public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword,
+                              List<Long> categoryIds, String sort, Integer featured, Integer top) {
         LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<Article>()
                 .eq(Article::getStatus, 1)
                 .eq(Article::getIsDeleted, 0);
+        if (featured != null) {
+            wrapper.eq(Article::getIsFeatured, featured);
+        }
+        if (top != null) {
+            wrapper.eq(Article::getIsTop, top);
+        }
         if (categoryIds != null && !categoryIds.isEmpty()) {
             wrapper.in(Article::getCategoryId, categoryIds);
         } else if (categoryId != null) {
@@ -111,6 +143,8 @@ public class ArticleService {
         // 否则每次翻页都会把整页文章的正文全文从数据库读回内存
         wrapper.select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary, Article::getCover,
                 Article::getViewCount, Article::getCommentCount, Article::getIsTop,
+                // 精品标记要一起查出来：首页中间那栏靠它渲染「精品」徽标
+                Article::getIsFeatured,
                 Article::getCategoryId, Article::getCreateTime, Article::getWordCount,
                 // 列表卡片上的日期优先显示「发布时间」，所以要把它一起查出来
                 Article::getPublishAt,
@@ -201,7 +235,11 @@ public class ArticleService {
         // 后台列表同样只取元信息：排除 content_md / content_html 两个正文大字段
         wrapper.select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary,
                 Article::getCover, Article::getStatus, Article::getPublishAt, Article::getUserId,
+                // 待审列表要能直接看到驳回理由（作者也靠它知道该改什么）
+                Article::getRejectReason,
                 Article::getCategoryId, Article::getSeries, Article::getIsTop, Article::getViewCount,
+                // 后台列表要显示「[精品]」徽标与「取消精品」按钮，必须把标记查出来
+                Article::getIsFeatured,
                 Article::getCommentCount, Article::getLikeCount, Article::getWordCount,
                 Article::getIsDeleted,
                 Article::getCreateTime, Article::getUpdateTime);
@@ -328,6 +366,41 @@ public class ArticleService {
     // 新建 / 更新
     // =================================================================
 
+    /**
+     * 当前请求是不是超级管理员。
+     * <p>超管在 JWT 过滤器里会同时拿到 {@code ROLE_admin} 与 {@code ROLE_super}
+     * （见 {@code JwtAuthenticationFilter#authoritiesOf}），所以判 {@code ROLE_super} 即准。
+     */
+    private boolean isSuper() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getAuthorities() == null) {
+            return false;
+        }
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_super".equals(a.getAuthority()));
+    }
+
+    /**
+     * 「精品」字段的授权闸门 —— 只有超管能改。
+     *
+     * <p>⚠️ 为什么非超管传入时是**静默丢弃**而不是抛错：
+     * 普通管理员编辑一篇"已由超管设为精品"的文章时，若前端把原值一起提交上来，
+     * 抛错会导致他永远改不了这篇（保存直接失败）。丢弃的语义是"这次请求对精品无效"，
+     * 原值保持不变 —— 伪造请求同样达不到目的，但不会误伤正常编辑。
+     *
+     * @return 允许写入的值；{@code null} 表示"不改动"
+     */
+    private Integer gateFeatured(Integer requested) {
+        if (requested == null) {
+            return null;
+        }
+        if (isSuper()) {
+            return Integer.valueOf(1).equals(requested) ? 1 : 0;
+        }
+        log.warn("非超管尝试设置精品字段，已忽略：requested={}", requested);
+        return null;
+    }
+
     @Transactional
     public Article create(ArticleDTO dto, Long userId) {
         // 先确定 slug 再落库：宁可提前给出「该 URL 已被占用」，也不要抛唯一键冲突
@@ -346,6 +419,9 @@ public class ArticleService {
         article.setCategoryId(categoryId);
         article.setSeries(dto.getSeries());
         article.setIsTop(dto.getIsTop() != null ? dto.getIsTop() : 0);
+        // 精品只能由超管设置：非超管传上来的值在这里被丢弃，落库恒为 0
+        Integer featured = gateFeatured(dto.getIsFeatured());
+        article.setIsFeatured(featured != null ? featured : 0);
         article.setWordCount(WordCounter.count(dto.getContentMd()));
         article.setUserId(userId);
         applyPublishSchedule(article, dto);
@@ -398,6 +474,12 @@ public class ArticleService {
         if (dto.getIsTop() != null) {
             article.setIsTop(dto.getIsTop());
         }
+        // 精品：不传 = 不改动（普通管理员的表单不会带这个字段，
+        // 否则他编辑一篇精品文章就会把超管设的标记抹掉）
+        Integer featured = gateFeatured(dto.getIsFeatured());
+        if (featured != null) {
+            article.setIsFeatured(featured);
+        }
 
         // slug 策略：
         //   1) 显式传了 slug → 用它（先查重）
@@ -431,6 +513,258 @@ public class ArticleService {
         return article;
     }
 
+    // =================================================================
+    // 作者（author）路径
+    // -----------------------------------------------------------------
+    // 为什么另起一套，而不是给 update() 加个参数：
+    //   后台管理员那套逻辑里混着「定时发布 / 置顶 / 精品」这些只有超管能碰的东西，
+    //   把作者塞进去就得在同一个方法里到处判角色，漏一处就是越权。
+    //   单独一条路径 + 单独的 DTO，边界一眼可见，也不必动那 37 个 admin 注解。
+    // =================================================================
+
+    /** 状态常量：0 草稿 / 1 已发布 / 2 待审 / 3 已驳回。只有 1 是公开的。 */
+    public static final int STATUS_DRAFT = 0;
+    public static final int STATUS_PUBLISHED = 1;
+    public static final int STATUS_PENDING = 2;
+    public static final int STATUS_REJECTED = 3;
+
+    /** 驳回理由最大长度，与 article.reject_reason 列宽保持一致 */
+    private static final int REJECT_REASON_MAX = 500;
+
+    /**
+     * 作者自己的文章列表。
+     *
+     * <p>⚠️ userId 由 controller 从登录态取、**不接受前端传**：
+     * 一旦允许传，把它换成别人的 id 就成了「看别人的草稿」。
+     */
+    public Page<Article> authorPage(Long userId, int pageNum, int pageSize, String keyword, Integer status) {
+        LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<Article>()
+                .eq(Article::getIsDeleted, 0)
+                .eq(Article::getUserId, userId);
+        if (status != null) {
+            wrapper.eq(Article::getStatus, status);
+        }
+        if (StrUtil.isNotBlank(keyword)) {
+            wrapper.like(Article::getTitle, keyword);
+        }
+        wrapper.orderByDesc(Article::getUpdateTime)
+                .select(Article::getId, Article::getTitle, Article::getSlug, Article::getSummary,
+                        Article::getCover, Article::getStatus, Article::getRejectReason,
+                        Article::getPublishAt, Article::getCategoryId, Article::getWordCount,
+                        Article::getViewCount, Article::getCreateTime, Article::getUpdateTime);
+        return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    /** 作者读自己的某一篇（编辑页回填正文）。不属于自己一律拒绝，避免"能读别人的草稿"。 */
+    public Article getOwnArticle(Long id, Long userId) {
+        Article article = articleMapper.selectById(id);
+        if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        if (userId == null || !Objects.equals(article.getUserId(), userId)) {
+            throw new BusinessException(403, "这不是你的文章");
+        }
+        return article;
+    }
+
+    /**
+     * 作者新建文章。
+     *
+     * @param submit true=提交审核（status=2），false=仅存草稿（status=0）
+     *
+     * <p>⚠️ 落库时这几个值**硬写**，不看调用方传什么：
+     * userId=当前用户、isTop=0、isFeatured=0、**publishAt=null**。
+     *
+     * <p>publishAt 必须为 null —— 定时发布任务的筛选条件是
+     * 「status=0 且 publish_at 不为空且已到期」，作者的文章永远没有 publish_at，
+     * 就永远不可能被自动发布，待审状态也就绕不过去。
+     */
+    @Transactional
+    public Article createForAuthor(AuthorArticleDTO dto, Long userId, boolean submit) {
+        if (userId == null) {
+            throw new BusinessException(401, "请先登录");
+        }
+        String content = StrUtil.blankToDefault(dto.getContentMd(), "");
+        if (submit && StrUtil.isBlank(content)) {
+            throw new BusinessException(400, "提交审核前请先写正文");
+        }
+
+        String slug = StrUtil.isNotBlank(dto.getSlug()) ? dto.getSlug().trim() : generateSlug(dto.getTitle());
+        ensureSlugAvailable(slug, null);
+
+        Article article = new Article();
+        article.setTitle(dto.getTitle());
+        article.setSlug(slug);
+        article.setContentMd(content);
+        article.setSummary(dto.getSummary());
+        article.setCover(dto.getCover());
+        article.setCategoryId(dto.getCategoryId() != null ? dto.getCategoryId() : defaultCategoryId());
+        article.setWordCount(WordCounter.count(content));
+        article.setUserId(userId);
+        article.setStatus(submit ? STATUS_PENDING : STATUS_DRAFT);
+        article.setRejectReason("");
+        article.setIsTop(0);
+        article.setIsFeatured(0);
+        article.setPublishAt(null);
+
+        try {
+            articleMapper.insert(article);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(400, "别名已被占用，请换一个自定义 URL 后重试");
+        }
+        syncTags(article.getId(), dto.getTagIds());
+        adjustCategoryCount(article.getCategoryId(), 1);
+        return article;
+    }
+
+    /**
+     * 作者修改自己的文章。
+     *
+     * <p>状态怎么走：
+     * <ul>
+     *   <li>草稿(0) / 已驳回(3) + 存草稿 → 仍是 0</li>
+     *   <li>草稿(0) / 已驳回(3) + 提交审核 → 2，并清空驳回理由</li>
+     *   <li>待审(2) → 保持 2（改完还是等审）</li>
+     *   <li>已发布(1) → 保持 1，且 <b>publish_at 不动</b>，改完直接生效</li>
+     * </ul>
+     *
+     * <p>「改完直接生效」是产品决定：审核只管第一次上屏。代价是作者能绕过审核改线上内容，
+     * 兜底靠 {@link #forceSnapshot} 留下的版本快照。
+     */
+    @Transactional
+    public Article updateForAuthor(Long id, AuthorArticleDTO dto, Long userId, boolean submit) {
+        Article article = articleMapper.selectById(id);
+        if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        // ⚠️ 归属校验必须在最前面：这条路径没有资源级的权限注解，
+        // 光靠「当前用户是 author」挡不住「改别人的文章」。
+        if (userId == null || !Objects.equals(article.getUserId(), userId)) {
+            throw new BusinessException(403, "这不是你的文章，无权修改");
+        }
+
+        int current = article.getStatus() == null ? STATUS_DRAFT : article.getStatus();
+        String oldTitle = article.getTitle();
+        Long oldCategoryId = article.getCategoryId();
+        String nextContent = dto.getContentMd() != null ? dto.getContentMd() : article.getContentMd();
+        if (submit && StrUtil.isBlank(nextContent)) {
+            throw new BusinessException(400, "提交审核前请先写正文");
+        }
+
+        // 正文变了才留快照（同管理员路径的口径，只是不做 autosave 节流）
+        if (!Objects.equals(article.getContentMd(), nextContent)) {
+            forceSnapshot(article, userId);
+        }
+
+        article.setTitle(dto.getTitle());
+        article.setContentMd(nextContent);
+        article.setSummary(dto.getSummary());
+        article.setCover(dto.getCover());
+        Long nextCategoryId = dto.getCategoryId() != null ? dto.getCategoryId() : defaultCategoryId();
+        article.setCategoryId(nextCategoryId);
+        article.setWordCount(WordCounter.count(nextContent));
+
+        // slug 策略与后台一致：只有草稿会跟随标题重生成，待审/已发布一律不动 URL，
+        // 否则外链和搜索引擎收录会 404
+        String slug = article.getSlug();
+        if (StrUtil.isNotBlank(dto.getSlug())) {
+            slug = dto.getSlug().trim();
+        } else if (current == STATUS_DRAFT && !Objects.equals(oldTitle, dto.getTitle())) {
+            slug = generateSlug(dto.getTitle());
+        }
+        ensureSlugAvailable(slug, id);
+        article.setSlug(slug);
+
+        if (current == STATUS_PUBLISHED) {
+            // 已发布：状态与发布时间都不动，改完直接生效
+            article.setStatus(STATUS_PUBLISHED);
+        } else if (submit) {
+            article.setStatus(STATUS_PENDING);
+            // 重新提交后旧理由就该消失（置空串而非 null：updateById 默认忽略 null 字段）
+            article.setRejectReason("");
+        } else {
+            article.setStatus(current == STATUS_PENDING ? STATUS_PENDING : STATUS_DRAFT);
+        }
+
+        try {
+            articleMapper.updateById(article);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(400, "别名已被占用，请换一个自定义 URL 后重试");
+        }
+        syncTags(id, dto.getTagIds());
+        if (!Objects.equals(oldCategoryId, nextCategoryId)) {
+            adjustCategoryCount(oldCategoryId, -1);
+            adjustCategoryCount(nextCategoryId, 1);
+        }
+        evictArticleCache(id);
+        return article;
+    }
+
+    /**
+     * 作者删自己的文章：**只允许草稿(0) 和已驳回(3)**。
+     * 待审的撤不回来（找超管），已发布的只有超管能删。
+     */
+    @Transactional
+    public void deleteForAuthor(Long id, Long userId) {
+        Article article = articleMapper.selectById(id);
+        if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        if (userId == null || !Objects.equals(article.getUserId(), userId)) {
+            throw new BusinessException(403, "这不是你的文章，无权删除");
+        }
+        int status = article.getStatus() == null ? STATUS_DRAFT : article.getStatus();
+        if (status != STATUS_DRAFT && status != STATUS_REJECTED) {
+            throw new BusinessException(400, "只有草稿和已驳回的文章可以删除，待审或已发布的请联系管理员");
+        }
+        delete(id);
+    }
+
+    /** 超管审核通过：置为已发布，发布时间 = 此刻（不采信作者选的时间）。 */
+    @Transactional
+    public Article approve(Long id) {
+        Article article = articleMapper.selectById(id);
+        if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        if (!Integer.valueOf(STATUS_PENDING).equals(article.getStatus())) {
+            throw new BusinessException(400, "这篇文章不在待审状态");
+        }
+        Article patch = new Article();
+        patch.setId(id);
+        patch.setStatus(STATUS_PUBLISHED);
+        patch.setPublishAt(LocalDateTime.now());
+        patch.setRejectReason("");
+        articleMapper.updateById(patch);
+        evictArticleCache(id);
+        return articleMapper.selectById(id);
+    }
+
+    /** 超管驳回：置为 3 并留下理由，作者改完可以重新提交。 */
+    @Transactional
+    public Article reject(Long id, String reason) {
+        Article article = articleMapper.selectById(id);
+        if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        if (!Integer.valueOf(STATUS_PENDING).equals(article.getStatus())) {
+            throw new BusinessException(400, "这篇文章不在待审状态");
+        }
+        String text = StrUtil.blankToDefault(reason, "").trim();
+        if (StrUtil.isBlank(text)) {
+            throw new BusinessException(400, "请填写驳回理由，作者需要知道该改什么");
+        }
+        if (text.length() > REJECT_REASON_MAX) {
+            text = text.substring(0, REJECT_REASON_MAX);
+        }
+        Article patch = new Article();
+        patch.setId(id);
+        patch.setStatus(STATUS_REJECTED);
+        patch.setRejectReason(text);
+        articleMapper.updateById(patch);
+        return articleMapper.selectById(id);
+    }
+
     /** 软删除（进回收站）。刻意保留 article_tag：从回收站恢复时标签才跟着回来。 */
     @Transactional
     public void delete(Long id) {
@@ -441,6 +775,33 @@ public class ArticleService {
         articleMapper.deleteById(id);
         adjustCategoryCount(article.getCategoryId(), -1);
         evictArticleCache(id);
+    }
+
+    /**
+     * 直接设置 / 取消「精品」。
+     *
+     * <p>后台文章列表的一键操作走这里，**不经过整篇保存**：
+     * 只改一个展示位标记，没必要触发版本快照（否则「设为精品」会在版本历史里留一版空改动）。
+     *
+     * <p>只更新非 null 字段（MyBatis-Plus 默认策略），所以不会碰正文与其它元信息。
+     */
+    @Transactional
+    public Article setFeatured(Long id, Integer featured) {
+        if (!isSuper()) {
+            throw new BusinessException(403, "只有超级管理员可以设置精品文章");
+        }
+        Article article = articleMapper.selectById(id);
+        // is_deleted 是本项目手工维护的逻辑删除，MyBatis-Plus 不会自动过滤，得自己判
+        if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        Article patch = new Article();
+        patch.setId(id);
+        patch.setIsFeatured(Integer.valueOf(1).equals(featured) ? 1 : 0);
+        articleMapper.updateById(patch);
+        evictArticleCache(id);
+        article.setIsFeatured(patch.getIsFeatured());
+        return article;
     }
 
     private boolean isDraft(Article article) {

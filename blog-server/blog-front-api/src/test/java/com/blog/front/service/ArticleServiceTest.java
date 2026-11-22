@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blog.common.dto.ArticleDTO;
+import com.blog.common.dto.AuthorArticleDTO;
 import com.blog.common.entity.Article;
 import com.blog.common.entity.ArticleRevision;
 import com.blog.common.entity.ArticleTag;
@@ -17,12 +18,16 @@ import com.blog.common.mapper.ArticleTagMapper;
 import com.blog.common.mapper.CategoryMapper;
 import com.blog.common.mapper.TagMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -34,9 +39,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -604,5 +611,237 @@ class ArticleServiceTest {
 
         assertEquals("我的旧文章", saved.getTitle());
         assertTrue(saved.getContentMd().startsWith("# 普通 Markdown"), "无 front matter 时全文都是正文");
+    }
+
+    // ---------------- 精品（is_featured） ----------------
+
+    /** 以指定角色“登录”，用于验证精品字段的授权闸门 */
+    private void loginAs(String authority) {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        1L, null, List.of(new SimpleGrantedAuthority(authority))));
+    }
+
+    @AfterEach
+    void clearAuth() {
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void page_withFeaturedFilter_addsColumnCondition() {
+        service().page(1, 6, null, null, null, null, "time", 1);
+
+        ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleMapper).selectPage(any(), captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+        assertTrue(sql.contains("is_featured"),
+                "传 featured 时必须往 WHERE 里加 is_featured 条件，实际片段：" + sql);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void page_withoutFeaturedFilter_hasNoColumnCondition() {
+        service().page(1, 6, null, null, null, null, "time");
+
+        ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleMapper).selectPage(any(), captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+        assertFalse(sql.contains("is_featured"),
+                "不传 featured 时不能凭空过滤，否则归档/分类页会丢文章，实际片段：" + sql);
+    }
+
+    @Test
+    void setFeatured_byAdmin_isRejected() {
+        loginAs("ROLE_admin");
+        BusinessException e = assertThrows(BusinessException.class, () -> service().setFeatured(7L, 1));
+        assertEquals(403, e.getCode(), "普通管理员（即使伪造请求）不能设置精品");
+    }
+
+    /**
+     * 首页中间那栏靠 top=1 取数、右侧「全部文章」靠 top=0 排除置顶。
+     * 断言里刻意找 `is_top =`（带等号）而不是 `is_top` ——
+     * ORDER BY 里本来就有 `is_top DESC`，只匹配列名会永远通过。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void page_withTopFilter_addsIsTopCondition() {
+        service().page(1, 50, null, null, null, null, "time", null, 1);
+
+        ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleMapper).selectPage(any(), captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+        assertTrue(sql.contains("is_top ="),
+                "传 top 时必须往 WHERE 里加 is_top 条件，实际片段：" + sql);
+    }
+
+    @Test
+    void setFeatured_bySuper_updatesOnlyFeaturedFlag() {
+        loginAs("ROLE_super");
+        Article row = article(7L, 1);
+        row.setIsDeleted(0);
+        row.setContentMd("正文不该被这次操作碰到");
+        when(articleMapper.selectById(7L)).thenReturn(row);
+
+        Article updated = service().setFeatured(7L, 1);
+
+        assertEquals(1, updated.getIsFeatured());
+        ArgumentCaptor<Article> captor = ArgumentCaptor.forClass(Article.class);
+        verify(articleMapper).updateById(captor.capture());
+        assertEquals(1, captor.getValue().getIsFeatured());
+        assertNull(captor.getValue().getContentMd(),
+                "只应更新精品标记；把正文一起写回去会覆盖别人正在编辑的内容");
+    }
+
+    @Test
+    void create_byAdmin_cannotSetFeatured() {
+        loginAs("ROLE_admin");
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("普通管理员想自己设精品");
+        dto.setStatus(1);
+        dto.setContentMd("有正文");
+        dto.setIsFeatured(1);
+
+        Article saved = service().create(dto, 2L);
+
+        assertEquals(0, saved.getIsFeatured(),
+                "非超管传上来的 isFeatured=1 必须被丢弃，落库恒为 0");
+    }
+
+    // ---------------- 作者投稿路径（author） ----------------
+    //
+    // 这一组守的是「审核制」的三条底线：
+    //   1) 作者提交的文章必须落在待审状态，且没有 publishAt（否则定时任务会自动发布）
+    //   2) 只能碰自己的文章
+    //   3) 已发布的文章被编辑时，状态与发布日期都不能变
+
+    @Test
+    void createForAuthor_submit_forcesPendingAndNoPublishAt() {
+        AuthorArticleDTO dto = new AuthorArticleDTO();
+        dto.setTitle("投稿");
+        dto.setContentMd("正文");
+
+        Article saved = service().createForAuthor(dto, 9L, true);
+
+        assertEquals(ArticleService.STATUS_PENDING, saved.getStatus());
+        assertEquals(9L, saved.getUserId(), "归属必须是当前登录用户，不能由前端决定");
+        assertNull(saved.getPublishAt(),
+                "publish_at 必须为 null：定时发布任务只看 status=0 + publish_at 到期，"
+                        + "给了时间就等于给了一条绕过审核的路");
+        assertEquals(0, saved.getIsTop());
+        assertEquals(0, saved.getIsFeatured());
+    }
+
+    @Test
+    void createForAuthor_submitWithoutContent_isRejected() {
+        AuthorArticleDTO dto = new AuthorArticleDTO();
+        dto.setTitle("空投稿");
+        dto.setContentMd("   ");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service().createForAuthor(dto, 9L, true));
+        assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void updateForAuthor_notOwner_isRejected() {
+        Article existing = new Article();
+        existing.setId(5L);
+        existing.setUserId(1L);
+        existing.setStatus(ArticleService.STATUS_DRAFT);
+        when(articleMapper.selectById(5L)).thenReturn(existing);
+
+        AuthorArticleDTO dto = new AuthorArticleDTO();
+        dto.setTitle("改别人的文章");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service().updateForAuthor(5L, dto, 9L, false));
+        assertEquals(403, ex.getCode(), "不是自己的文章必须 403，否则投稿系统等于开放编辑");
+    }
+
+    @Test
+    void updateForAuthor_published_keepsStatusAndPublishAt() {
+        LocalDateTime publishedAt = LocalDateTime.of(2026, 1, 2, 3, 4);
+        Article existing = new Article();
+        existing.setId(5L);
+        existing.setUserId(9L);
+        existing.setStatus(ArticleService.STATUS_PUBLISHED);
+        existing.setPublishAt(publishedAt);
+        existing.setSlug("keep-me");
+        existing.setTitle("老标题");
+        when(articleMapper.selectById(5L)).thenReturn(existing);
+        // 正文变了会先留一版快照，这里让"查已有版本"返回空列表
+        when(articleRevisionMapper.selectMetaList(any(), anyInt())).thenReturn(List.of());
+
+        AuthorArticleDTO dto = new AuthorArticleDTO();
+        dto.setTitle("新标题");
+        dto.setContentMd("新正文");
+
+        Article updated = service().updateForAuthor(5L, dto, 9L, false);
+
+        assertEquals(ArticleService.STATUS_PUBLISHED, updated.getStatus(),
+                "已发布的文章改完仍然已发布（审核只管第一次上屏）");
+        assertEquals(publishedAt, updated.getPublishAt(),
+                "编辑不能刷新发布时间，否则卡片日期和热力图会漂");
+        assertEquals("keep-me", updated.getSlug(), "已发布文章的 URL 不能悄悄变");
+    }
+
+    @Test
+    void updateForAuthor_draftSubmit_becomesPending() {
+        Article existing = new Article();
+        existing.setId(5L);
+        existing.setUserId(9L);
+        existing.setStatus(ArticleService.STATUS_REJECTED);
+        existing.setSlug("mine");
+        existing.setTitle("标题");
+        existing.setRejectReason("图挂了");
+        when(articleMapper.selectById(5L)).thenReturn(existing);
+        when(articleRevisionMapper.selectMetaList(any(), anyInt())).thenReturn(List.of());
+
+        AuthorArticleDTO dto = new AuthorArticleDTO();
+        dto.setTitle("标题");
+        dto.setContentMd("正文");
+
+        Article updated = service().updateForAuthor(5L, dto, 9L, true);
+
+        assertEquals(ArticleService.STATUS_PENDING, updated.getStatus(),
+                "驳回后重新提交必须回到待审");
+        assertEquals("", updated.getRejectReason(), "重新提交后旧理由要清掉");
+    }
+
+    @Test
+    void deleteForAuthor_published_isRejected() {
+        Article existing = new Article();
+        existing.setId(5L);
+        existing.setUserId(9L);
+        existing.setStatus(ArticleService.STATUS_PUBLISHED);
+        when(articleMapper.selectById(5L)).thenReturn(existing);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service().deleteForAuthor(5L, 9L));
+        assertEquals(400, ex.getCode(), "已发布的文章作者不能自己删，只能找超管");
+    }
+
+    @Test
+    void approve_onNonPending_isRejected() {
+        Article existing = new Article();
+        existing.setId(5L);
+        existing.setStatus(ArticleService.STATUS_DRAFT);
+        when(articleMapper.selectById(5L)).thenReturn(existing);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service().approve(5L));
+        assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void reject_withoutReason_isRejected() {
+        Article existing = new Article();
+        existing.setId(5L);
+        existing.setStatus(ArticleService.STATUS_PENDING);
+        when(articleMapper.selectById(5L)).thenReturn(existing);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service().reject(5L, "   "));
+        assertEquals(400, ex.getCode(), "驳回必须写理由，否则作者只会反复重交同一篇");
     }
 }

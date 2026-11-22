@@ -41,6 +41,15 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/friend-link/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/site-config/public").permitAll()
                 .requestMatchers("/api/auth/oauth/**").permitAll()
+                // 账号体系里匿名必须可达的 5 个入口。
+                // 🔴 少一行就是"登录永远 403"，而且路径看起来很像已经放行了（兜底是 permitAll），
+                // 极难排查 —— 加/改这里的接口时请连同这组一起看。
+                // 改密码与绑手机**不在此列**：它们要求已登录，走下面的 authenticated()。
+                .requestMatchers(HttpMethod.POST, "/api/auth/sms/send").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/login/sms").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/password/reset").permitAll()
                 .requestMatchers("/uploads/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/doc.html").permitAll()
                 // RAG 服务没有 JWT，只能用共享令牌：这里放行，由 InternalAiController 自己校验 X-RAG-Token，

@@ -50,6 +50,13 @@ public class ArticleDTO {
 
     private Integer isTop;
 
+    /**
+     * 是否标为「精品」（质量徽标，由超管授予；不决定首页布局）。
+     * <p>⚠️ 这个值**不可信**：前端只在超管账号下渲染勾选框，但请求可以被伪造。
+     * {@code ArticleService} 会再判一次角色，非 super 传上来的值一律丢弃。
+     */
+    private Integer isFeatured;
+
     /** 定时发布时间；仅当 status=0 且时间在未来时生效 */
     private LocalDateTime publishAt;
 }

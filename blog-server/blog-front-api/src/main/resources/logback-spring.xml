@@ -1,18 +1,33 @@
-<?xml version="1.0" encoding="UTF-8"?>
 <!--
   ==========================================================================
-  日志配置（控制台 + 文件双输出）
+  日志配置（控制台 + 全量 + 错误 + 接口摘要，四路输出）
   ==========================================================================
 
   为什么要有这个文件：此前项目只有控制台输出，而 systemd 又没有把 stdout 落盘，
   结果是「服务一重启，崩溃前的日志全没了」，线上排障等于摸黑。
-  现在改为：控制台（给 systemd journal / 前台调试）+ 文件（可回溯）。
+
+  四路分工（**别用一套日志干所有事**）：
+
+    ① CONSOLE       前台调试 / journalctl 可见
+    ② FILE          blog-api.log        全量，7 天，512MB —— 排障用，价值最低最占地方
+    ③ ERROR_FILE    blog-api-error.log  只 WARN 及以上，30 天，200MB —— 有堆栈，量极小
+    ④ ACCESS_FILE   blog-api-access.log 每个 /api 请求一行，14 天，1.5GB —— 抓链路与慢接口
+
+  为什么 access 留 14 天、全量只留 7 天：安全事件回溯通常要跨周（"上周三谁动过这篇文章"），
+  而全量日志里 90% 是重复的框架噪音，留久了只占磁盘。
+
+  requestId：%X{rid} 由 ApiAccessLogFilter 写入 MDC 并回写响应头 X-Request-Id。
+  前端报错时把该 header 贴过来，就能 `grep 'rid=xxxx'` 把一次请求的全部日志捞出来。
+
+  ⚠️ 生产禁止 DEBUG：
+     根级别读的是 Spring 的 logging.level.root（默认 INFO），**不再读环境变量 LOG_LEVEL** ——
+     环境变量谁都能设，被设成 DEBUG 就会把 SQL 参数（含密码哈希）和请求体写进磁盘。
+     生产由 application-prod.yml 的 logging.level.root: INFO 钉死。
 
   日志目录来源：Spring 配置项 logging.file.path
-    * 本地开发：application.yml 里默认 ./logs
-    * 生产    ：application-prod.yml 里设为 /opt/blog/logs
-  滚动策略：单文件最大 50MB，按天归档并 gzip，保留 30 天。
-  环境变量 LOG_LEVEL 可覆盖根日志级别（默认 INFO）。
+    * 本地开发：application.yml 默认 ./logs
+    * 生产    ：application-prod.yml 设为 /opt/blog/logs
+  ⚠️ 别依赖 systemd 的 WorkingDirectory 兜底 —— 工作目录一变日志就跑到别处去了。
 
   注意：文件名必须是 logback-spring.xml（带 -spring 后缀）才能让 Spring Boot
   接管 springProperty 解析；普通单元测试不加载它，因此不影响测试。
@@ -22,14 +37,22 @@
 
     <!-- 从 Spring 环境读取日志目录；缺失时退回 ./logs，保证本地也能跑 -->
     <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
+    <!--
+      根级别从 Spring 配置读（logging.level.root），不再读环境变量 LOG_LEVEL。
+      原因：环境变量谁都能设，一旦线上被设成 DEBUG，SQL 参数（含密码哈希）和请求体全会落盘。
+      现在级别由 application-prod.yml 钉住（root: INFO），本地开发想调试就在 application.yml 改。
+    -->
+    <springProperty scope="context" name="ROOT_LEVEL" source="logging.level.root" defaultValue="INFO"/>
+    <property name="LOG_LEVEL" value="${ROOT_LEVEL}"/>
 
-    <property name="LOG_LEVEL" value="${LOG_LEVEL:-INFO}"/>
+
+    <!-- rid 放在最前面便于 grep；没有 rid 的（启动期日志）显示 no-rid -->
     <property name="PATTERN"
-              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n"/>
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level rid=%X{rid:-no-rid} [%thread] %logger{36} - %msg%n"/>
     <property name="CONSOLE_PATTERN"
-              value="%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{36}) - %msg%n"/>
+              value="%d{HH:mm:ss.SSS} %highlight(%-5level) rid=%X{rid:-no-rid} %cyan(%logger{30}) - %msg%n"/>
 
-    <!-- 控制台：前台运行 / journalctl 可见 -->
+    <!-- ① 控制台：前台运行 / journalctl 可见 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>${CONSOLE_PATTERN}</pattern>
@@ -37,14 +60,14 @@
         </encoder>
     </appender>
 
-    <!-- 全量日志文件 -->
+    <!-- ② 全量日志：7 天 / 512MB -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_PATH}/blog-api.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
             <fileNamePattern>${LOG_PATH}/blog-api.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>50MB</maxFileSize>
-            <maxHistory>30</maxHistory>
-            <totalSizeCap>2GB</totalSizeCap>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>512MB</totalSizeCap>
             <cleanHistoryOnStart>true</cleanHistoryOnStart>
         </rollingPolicy>
         <encoder>
@@ -53,7 +76,10 @@
         </encoder>
     </appender>
 
-    <!-- 只收 WARN 及以上的错误日志文件：排障时直接看这个，噪音小 -->
+    <!--
+      ③ 错误日志：只收 WARN 及以上，30 天 / 200MB。
+      异常堆栈只在这里保证完整 —— 全量日志会被 50MB 单文件切碎，堆栈跨文件很难看。
+    -->
     <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_PATH}/blog-api-error.log</file>
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
@@ -63,7 +89,7 @@
             <fileNamePattern>${LOG_PATH}/blog-api-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>50MB</maxFileSize>
             <maxHistory>30</maxHistory>
-            <totalSizeCap>1GB</totalSizeCap>
+            <totalSizeCap>200MB</totalSizeCap>
             <cleanHistoryOnStart>true</cleanHistoryOnStart>
         </rollingPolicy>
         <encoder>
@@ -72,14 +98,65 @@
         </encoder>
     </appender>
 
+    <!-- ④ 接口摘要：一个请求一行，14 天 / 1.5GB -->
+    <appender name="ACCESS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/blog-api-access.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/blog-api-access.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>64MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>1536MB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--
+      异步包装：同步写盘时磁盘一抖就阻塞业务线程（表现为"接口偶尔卡一下"）。
+      discardingThreshold=0 表示队列满也不丢事件；neverBlock=false 表示宁可短暂阻塞也不丢。
+      博客这个量级（每秒几十条以内）完全够用。
+    -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="FILE"/>
+    </appender>
+
+    <appender name="ASYNC_ERROR_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>256</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="ERROR_FILE"/>
+    </appender>
+
+    <appender name="ASYNC_ACCESS_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>2048</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="ACCESS_FILE"/>
+    </appender>
+
     <!-- 与 application.yml 的 logging.level 保持一致，压掉 MyBatis 的噪音 -->
     <logger name="com.blog.common.mapper" level="WARN"/>
     <logger name="org.mybatis" level="WARN"/>
     <logger name="org.mybatis.spring" level="WARN"/>
 
+    <!--
+      ACCESS 是独立 logger：additivity=false 表示它只进 ACCESS_FILE，
+      不会再被 root 写一遍到 blog-api.log（否则同一条日志存两份，浪费一半磁盘）。
+      ⚠️ 注意根级别降到 WARN 时也别把这个 logger 关掉，它固定 INFO。
+    -->
+    <logger name="ACCESS" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_ACCESS_FILE"/>
+    </logger>
+
     <root level="${LOG_LEVEL}">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-        <appender-ref ref="ERROR_FILE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_ERROR_FILE"/>
     </root>
 </configuration>

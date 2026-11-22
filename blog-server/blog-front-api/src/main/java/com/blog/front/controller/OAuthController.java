@@ -125,6 +125,10 @@ public class OAuthController {
             user.setSource(provider);
             user.setRole("user");
             user.setStatus(1);
+            // 显式声明：OAuth 建号的密码是随机 UUID 的哈希，用户不可能知道原文。
+            // 不写这一行也能靠 DB 默认值 0 生效，但显式写出来才能让后来的人
+            // 一眼看懂"这批账号的 password 字段是不可用的"。
+            user.setPasswordSet(0);
 
             if ("github".equals(provider)) {
                 user.setGithubId(oauthUser.getOpenId());

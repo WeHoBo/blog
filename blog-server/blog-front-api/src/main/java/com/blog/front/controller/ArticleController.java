@@ -101,7 +101,11 @@ public class ArticleController {
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) Long tagId,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String sort) {
+            @RequestParam(required = false) String sort,
+            // 精品过滤：1 只要 / 0 排除 / 不传 不限。首页布局改由置顶驱动，这个维度保留给后台筛选
+            @RequestParam(required = false) Integer featured,
+            // 置顶过滤：1 只要置顶 / 0 排除置顶。首页中间取 1、右侧「全部文章」取 0
+            @RequestParam(required = false) Integer top) {
         List<Long> categoryIds = null;
         if (categoryId != null) {
             categoryIds = new ArrayList<>();
@@ -110,7 +114,7 @@ public class ArticleController {
                     new LambdaQueryWrapper<Category>().eq(Category::getParentId, categoryId));
             categoryIds.addAll(children.stream().map(Category::getId).collect(Collectors.toList()));
         }
-        Page<Article> page = articleService.page(pageNum, pageSize, categoryId, tagId, keyword, categoryIds, sort);
+        Page<Article> page = articleService.page(pageNum, pageSize, categoryId, tagId, keyword, categoryIds, sort, featured, top);
         List<Article> articles = page.getRecords();
         List<Map<String, Object>> records = new ArrayList<>();
         if (!articles.isEmpty()) {
@@ -140,12 +144,17 @@ public class ArticleController {
                 item.put("viewCount", a.getViewCount());
                 item.put("commentCount", a.getCommentCount());
                 item.put("isTop", a.getIsTop());
+                // 只影响卡片上的「精品」徽标，不决定首页布局（首页由 isTop 驱动）
+                item.put("isFeatured", a.getIsFeatured());
                 item.put("categoryId", a.getCategoryId());
                 // 历史数据可能没写 category_id（新数据在保存时已落到默认分类）：展示层统一兜底，
                 // 保证列表里永远显示得出分类名，不会出现空白
                 item.put("categoryName", a.getCategoryId() != null
                         ? categoryNameMap.getOrDefault(a.getCategoryId(), CategoryConstants.DEFAULT_CATEGORY_NAME)
                         : CategoryConstants.DEFAULT_CATEGORY_NAME);
+                // 发布时间：卡片日期口径是 `publishAt || createTime`（前端已这么写），
+                // 但以前列表接口没返回这个字段，于是永远回落到创建时间 —— 定时发布的文章日期会偏早。
+                item.put("publishAt", a.getPublishAt());
                 item.put("createTime", a.getCreateTime());
                 item.put("wordCount", a.getWordCount() != null ? a.getWordCount() : 0);
                 if (a.getUserId() != null) {
@@ -340,6 +349,53 @@ public class ArticleController {
         articleService.delete(id);
         evictAggCache();
         return Result.ok();
+    }
+
+    /**
+     * 设为 / 取消「精品」（首页横幅中间展示的优质文章）。
+     *
+     * <p>只给超管：普通管理员发布的文章统一进右侧「全部文章」，不能自己挑自己当精品。
+     * 这里用独立接口而不是走整篇 {@code PUT /{id}}，是为了让后台列表能一键切换，
+     * 不必把整篇正文读出来再写回去。
+     */
+    @PreAuthorize("hasRole('super')")
+    @PutMapping("/{id:\\d+}/featured")
+    public Result<Article> setFeatured(@PathVariable Long id,
+                                       @RequestBody Map<String, Object> body) {
+        Object raw = body.get("featured");
+        int featured = (raw instanceof Boolean b) ? (b ? 1 : 0)
+                : (raw != null && "1".equals(String.valueOf(raw))) ? 1 : 0;
+        Article updated = articleService.setFeatured(id, featured);
+        // 首页有 20s 缓存，不清的话要等一轮才看得见
+        evictAggCache();
+        return Result.ok(updated);
+    }
+
+    // =================================================================
+    // 作者投稿的审核（只有超管能操作）
+    // =================================================================
+
+    /**
+     * 通过审核：置为已发布，发布时间 = 此刻。
+     *
+     * <p>用独立接口而不是 {@code PUT /{id}} 改 status，是因为整篇保存要求把正文一起传回来，
+     * 审核时前端只有列表里的元信息。而且审核是个不可逆的动作，独立接口更好记审计。
+     */
+    @PreAuthorize("hasRole('super')")
+    @PostMapping("/{id:\\d+}/approve")
+    public Result<Article> approve(@PathVariable Long id) {
+        Article article = articleService.approve(id);
+        evictAggCache();
+        return Result.ok(article);
+    }
+
+    /** 驳回：置为 3 并留下理由。理由必填 —— 不写的话作者只会反复重交同一篇。 */
+    @PreAuthorize("hasRole('super')")
+    @PostMapping("/{id:\\d+}/reject")
+    public Result<Article> reject(@PathVariable Long id,
+                                  @RequestBody(required = false) Map<String, Object> body) {
+        String reason = body == null ? "" : String.valueOf(body.getOrDefault("reason", ""));
+        return Result.ok(articleService.reject(id, reason));
     }
 
     // =================================================================

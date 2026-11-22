@@ -74,3 +74,20 @@ __pycache__/
 /*.png
 /*.jpg
 /*.jpeg
+
+# P0/POC 验证目录（本地临时脚本与模型，不入库）
+_poc/
+
+# 第三方 Live2D 模型（大肥鱼 / DeepSeek-chan）
+# 两个理由都不能入库：① 61MB 二进制；② 作者使用须知禁止重新分发模型文件。
+# 站点上只用从渲染图导出的 public/companion/*.webp，那两个是二次创作，允许。
+DeepSeek免费公皮/
+DeepSeek免费公皮.zip
+
+# 只作参考、不属于本项目的第三方源码（GitHub zip 解压出来的）
+# 体积大且带自己的 LICENSE，放进仓库既污染体积也会让授权边界变模糊。
+l2d-widget-main/
+petfolio-main/
+
+# 临时截图目录（手机端调试截图，文件名带全角破折号，`/` 结尾严格匹配目录）
+blog——phone/

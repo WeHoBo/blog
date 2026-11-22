@@ -1,10 +1,20 @@
 <template>
   <NuxtLink :to="articlePath(article)"
-    class="block bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-200 overflow-hidden group"
-    :class="layout === 'grid' ? 'flex flex-col h-full' : ''">
+    class="relative block bg-white dark:bg-gray-800 rounded-xl border transition-colors duration-200 overflow-hidden group"
+    :class="[layout === 'grid' ? 'flex flex-col h-full' : '',
+             article.isFeatured
+               ? 'border-primary-200/80 dark:border-primary-800/60 hover:border-primary-300 dark:hover:border-primary-700'
+               : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600']">
+
+    <!-- 精品标记：顶部 2px 主题色细线。
+         只靠标题前那个小徽章，一屏扫下来和普通文章几乎没差别；
+         加一道通栏细线之后，「这是精选」在余光里就能读到，而且不抢正文。
+         右栏「全部文章」用的是 ArticleRow（紧凑行），没有这条线 —— 两边天然区分。 -->
+    <span v-if="article.isFeatured" class="absolute inset-x-0 top-0 h-[2px] bg-primary-600/55 z-10" aria-hidden="true"></span>
     <!-- 网格模式：顶部插图 + 下方信息 -->
     <template v-if="layout === 'grid'">
-      <div class="aspect-video overflow-hidden bg-gray-100 dark:bg-gray-700 flex-shrink-0">
+      <!-- 封面比例由 ratio 决定：默认 16:9；首页右栏「全部文章」用 2:1（更扁，窄栏里不显笨重） -->
+      <div class="overflow-hidden bg-gray-100 dark:bg-gray-700 flex-shrink-0" :class="coverAspect">
         <img v-if="article.cover" :src="ossImage(article.cover, { w: IMG_W.card })" :alt="article.title" loading="lazy" decoding="async"
           class="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500" />
         <div v-else class="w-full h-full flex items-center justify-center theme-illustration">
@@ -13,7 +23,7 @@
       </div>
       <div class="p-4 flex-1 flex flex-col">
         <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 line-clamp-2 title-hover transition-colors leading-snug">
-          <span v-if="article.isTop" class="inline-block text-[10px] bg-primary-600 text-white px-1.5 py-0.5 rounded mr-1.5 align-middle font-medium">置顶</span><span v-html="hlTitle"></span>
+          <span v-if="article.isFeatured" class="inline-block text-[10px] bg-primary-600/10 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300 border border-primary-300/60 dark:border-primary-500/40 px-1.5 py-0.5 rounded mr-1.5 align-middle font-medium">精品</span><span v-if="article.isTop" class="inline-block text-[10px] bg-primary-600 text-white px-1.5 py-0.5 rounded mr-1.5 align-middle font-medium">置顶</span><span v-html="hlTitle"></span>
         </h2>
         <div class="mt-3 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-auto pt-2">
           <span>{{ shownDate }}</span>
@@ -30,7 +40,7 @@
           <div class="flex items-baseline gap-2.5 mb-2.5">
             <span class="w-[3px] h-4 theme-bar rounded-full flex-shrink-0 translate-y-0.5"></span>
             <h2 class="title-hover text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100 line-clamp-2 transition-colors leading-snug">
-              <span v-html="hlTitle"></span>
+              <span v-if="article.isFeatured" class="inline-block text-[10px] bg-primary-600/10 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300 border border-primary-300/60 dark:border-primary-500/40 px-1.5 py-0.5 rounded mr-1.5 align-middle font-medium">精品</span><span v-if="article.isTop" class="inline-block text-[10px] bg-primary-600 text-white px-1.5 py-0.5 rounded mr-1.5 align-middle font-medium">置顶</span><span v-html="hlTitle"></span>
             </h2>
           </div>
 
@@ -71,11 +81,20 @@ import { ossImage, IMG_W } from '~/utils/image'
 import { highlightKeyword } from '~/utils/highlight'
 
 const props = withDefaults(defineProps<{
-  article: { id: number; title: string; slug?: string; summary: string; cover: string; isTop: number; viewCount: number; commentCount: number; createTime: string; publishAt?: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
+  article: { id: number; title: string; slug?: string; summary: string; cover: string; isTop: number; isFeatured?: number; viewCount: number; commentCount: number; createTime: string; publishAt?: string; wordCount?: number; categoryName?: string; tags?: { id: number; name: string }[]; author?: { nickname: string; avatar: string } }
   layout?: 'list' | 'grid'
+  /** 封面比例（只对 grid 生效）：默认 16:9；首页右栏用 2:1 */
+  ratio?: '16:9' | '2:1'
   /** 搜索结果页传当前关键词进来；为空时等同于原样输出（仍然会转义） */
   keyword?: string
-}>(), { layout: 'list', keyword: '' })
+}>(), { layout: 'list', ratio: '16:9', keyword: '' })
+
+/**
+ * 封面比例类名。
+ * ⚠️ 必须写成字面量（`aspect-[2/1]`），不能让 Tailwind 去拼字符串 ——
+ * 拼接出来的类名不会被 JIT 扫描到，线上就是「没有这个样式」。
+ */
+const coverAspect = computed(() => (props.ratio === '2:1' ? 'aspect-[2/1]' : 'aspect-video'))
 
 /**
  * 卡片上显示的日期 = 发布时间，没有就退回创建时间。

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("user")
@@ -12,6 +14,16 @@ public class User extends BaseEntity {
     private String username;
 
     private String password;
+
+    /**
+     * 用户自己设过密码吗。1 = 是；0 = 否。
+     *
+     * <p>⚠️ 这个字段不能省，也不能用「password 是否为空」代替：
+     * OAuth 自动建号时写入的是 {@code BCrypt(随机 UUID)}，字段有值但没人知道原文。
+     * 只能靠这个标记区分「真有可用密码」与「有密码字段但用不了」，
+     * 个人中心据此提示"你还没设置密码"，改密码时据此决定要不要求旧密码。
+     */
+    private Integer passwordSet;
 
     private String nickname;
 
@@ -25,6 +37,12 @@ public class User extends BaseEntity {
     private String bio;
 
     private String email;
+
+    /** 手机号（唯一，可为空）。OAuth 老用户没绑过，保持 NULL 不影响唯一索引 */
+    private String phone;
+
+    /** 手机号最近一次通过短信验证的时间 */
+    private LocalDateTime phoneVerifiedAt;
 
     private String role;
 

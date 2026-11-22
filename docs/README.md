@@ -68,6 +68,11 @@
 - **横幅文案（Banner Title）**：首页「你好，我是 ___」、副标题、关注方向、SEO 标题/描述全部来自后台「站点设置」（2026-11-07 起，11-13 扩充）。**顶部横幅头像固定用站点 Logo**（`public/logo.svg`），它是站点广播，所有管理员都能在站点设置里编辑
 - **右栏作者卡（2026-11-13 修正）**：**登录用户显示自己的**头像 / 昵称 / 简介（个人中心里自己填），没填就显示占位（首字母圆牌 + 「还没写简介」），**绝不回落成站点广播**；**访客**才显示站点博主信息。字段 `user.bio`（`sql/user-bio.sql` 幂等加列），值在 SSR 用 cookie 里的 token 调 `/auth/me` 取，避免 localStorage 读不到导致头像闪一下才变
 - **头像上传（2026-11-13）**：新增 `POST /api/upload/avatar`，**任何登录用户**可用、只收图片、限 2MB、前端先压到 512px WebP、**不写 `upload_file` 素材库表**。原来的 `/api/upload` 是后台素材库入口，带 `@PreAuthorize("hasRole('admin')")`，普通用户拿它传头像必然 403
+- **账号体系（2026-11-21）**：三种登录方式并存 —— **用户名+密码**、**手机号+验证码**、第三方（GitHub/Gitee/华为）。注册必须过手机验证码（`sql/phone-login.sql` 幂等加 `user.phone` / `password_set` / `phone_verified_at` + `uk_phone`）。
+  - **第三方自动注册保留**：老用户只有这条路能进（他们的 `password` 是 `BCrypt(随机UUID)`，`password_set=0`，没人知道原文）。个人中心「账号安全」引导自己补设置密码 + 绑定手机，补齐后账号就有独立凭证。
+  - 短信走阿里云**号码认证服务的「短信认证」（dypnsapi）**，**不是**常规短信服务（dysmsapi）——后者个人认证账号无法完成运营商签名实名报备，办不下来。免签名、免模板报备，个人实名即可。
+  - 四道限流：同号 60 秒冷却 + 日 5 条、同 IP 日 10 条、**全局日 200 条熔断**（防被刷）、校验失败 5 次作废；密码登录连错 5 次锁 15 分钟。
+  - 验证码按场景隔离（register/login/reset/bind），登录的码不能拿去重置密码；改密码要求旧密码（从未设过的除外）。
 - **角色与权限（2026-11-13 引入 super）**：三个角色 `user` / `admin` / `super`，**超管继承管理员**（`JwtAuthenticationFilter` 给 `super` 同时发 `ROLE_admin` 和 `ROLE_super`），所以历史 30 多处 `hasRole('admin')` 一处没动，只把危险操作单独收窄。**只给超管**：用户管理整类（改角色/改密码/禁用）、AI 模型的增删改/设默认/连通性测试、`PUT /admin/ai/setting`（限流与预算）、文章彻底删除（`/{id}/force`、`/batch-force-delete`）。**留给管理员**：文章增删改、回收站恢复、版本回滚、分类/标签/友链、评论、素材库上传、站点设置、AI 用量与日志只读。⚠️ 角色写在 JWT claim 里，**改库后必须重新登录**才生效；后台不提供授予超管入口，只能跑 `sql/super-admin.sql`（幂等，未找到目标账号时不会降级现有超管）
 - **品牌（2026-11-13）**：站名「博观」，logo 由 `scripts/gen-brand-assets.mjs` 的几何定义生成 svg + 5 个 PNG；顶栏、favicon、apple-touch、分享卡、前后台导航同一图形
 - **发布热力图**：首页左栏分类下方，按月切换、标记今天、按当天发文数分 5 档，`COALESCE(publish_at, create_time)` 让历史文章自动计入；`GET /api/article/contribution?month=YYYY-MM`
@@ -76,6 +81,8 @@
 - **「检索失败」≠「站内没有」（2026-11-14）**：`llm_client._RULES_BASE` 第 5 条把两者的判断依据写死成「工具返回的 `ok` 字段」——`ok:true` 且结果为空才可以说「站内资料里没有相关内容」；`ok:false`（401/超时/知识库未就绪）必须说「站内检索暂时不可用」，**不许用模型记忆冒充站内资料**。此前 embedding key 失效时，模型把"查不了"说成"站内没有"，用户误以为博主没写过
 - **`/health` 探活 embedding（2026-11-14）**：原来只报 `chunks`，而那个数读的是 Chroma 本地元数据，key 失效时照样是 1055，服务一片绿但所有检索都 500。现在真打一次 `embedding("ping")`，结果缓存 60s，返回 `embedding: {ok, error, model}` 与 `status: ok/degraded`；`?probe=1` 强制重测（换完 key 不用等）。8 秒超时保护，不会把 `/health` 拖死
 - **页面缓存主动失效**：`POST /__cache/purge`（校验 admin **或 super** token 后清 Nitro cache），发文章与保存站点设置后自动调用；**缓存命中不再让新文章晚 10–20 秒出现**
+- **首页分区与精品强调（2026-11-18）**：右栏「全部文章」上方加一排**分区胶囊**（按一级分类取有文章的 top5），点击**只筛右栏**、不触发全局筛选，解决「想找实验报告得刷过十几篇外文阅读」；默认「全部」仍是时间流、首屏零额外请求。精品卡片加**顶部 2px 主题色通栏细线 + 填充式徽章**，与右栏中性紧凑行拉开层级；`sidePaneMax` 按有无胶囊在 588/620 之间切换，保证左右两栏底边齐平。同时修掉 Hero 三个按钮不换行导致的溢出
+- **接口日志与审计（2026-11-18）**：四路日志分工 —— 全量 7 天/512MB、error（含完整堆栈）30 天/200MB、**接口摘要 14 天/1.5GB**、控制台。新增 `ApiAccessLogFilter`：每请求生成 `requestId` 写入 MDC 并回写响应头 `X-Request-Id`，一行 INFO 记「方法 路径 状态码 耗时 用户 IP（打码）」，**不记 body、不记 query string**（OAuth 的 `code` 是凭证），跳过 `/api/ai/**`（SSE）与阅读打点；写盘走 AsyncAppender 避免阻塞业务线程。`GlobalExceptionHandler` 的业务异常/参数错误/**403 越权**全部补 rid + 方法 + 路径。`operation_log` 增 `status/cost_ms/ip/request_id`（`sql/operation-log-v2.sql` 幂等），审计从「只记成功」改为环绕切面「成功失败都记」，覆盖范围扩到评论/举报/审核通过驳回/答题授予；后台「操作日志」页可只看失败、点 requestId 复制去 grep 文件日志
 - **运维**：日志落盘滚动、每日备份脚本（`deploy/backup.sh`）、`deploy/` 纳入版本库、systemd 239 兼容
 - **性能**：列表列白名单、聚合查询替代 N+1、gzip/brotli、prefetch 过滤、mermaid vendor 化、OSS 图片处理参数（WebP）、**公开页 SWR 缓存（10–300s）+ 阅读数浏览器打点**
 
@@ -83,6 +90,11 @@
 
 > 据各报告「遗留/建议」章节整理，**未逐条复核**；动手前请先在代码里确认现状。
 
+0. **服务器侧日志治理（2026-11-18，需手工执行，代码已就绪）**：
+   ① `deploy/nginx-logging.conf` → `/etc/nginx/conf.d/00-log-format.conf`（带 `$request_time` 的 log_format，nginx 默认 combined 没有耗时）；
+   ② `deploy/logrotate-blog` → `/etc/logrotate.d/blog`（只管 nginx；**千万不要把 `/opt/blog/logs` 加进去**，应用日志归 logback，两套清理会打架）；
+   ③ `/etc/systemd/journald.conf` 加 `SystemMaxUse=500M`（控制台输出走 journald，不设会默认吃掉磁盘 10%）；
+   ④ 磁盘/inode 告警（阿里云主机监控，80% 预警 / 90% 严重；`df -i` 只能自己看）。
 1. 评论审核队列（先审后发）—— 评论管理 + 举报处理已落地（2026-10-29），但仍是「发布即通过」，没有先审后发
 2. 首页分类筛选仍是页内状态，未改由路由驱动
 3. ~~站点设置 4 项（`siteDesc` / `bloggerName` / `bloggerBio` / `bloggerAvatar`）前台未生效~~ ——
@@ -107,6 +119,13 @@
 12. **隐私政策里的应用名称仍是「好啵博客」**（Web `pages/privacy.vue`、鸿蒙 `pages/Privacy.ets`）：
     改名会牵扯备案登记名称与 App 内政策三处同步，本批**故意未动**，等确认备案口径后再一起改
 13. `/free-chat` 的 `max_length=6000` 与「AI 总结本文」送 18000 字符冲突 → 超长文章必 422
+14. ~~首页布局（左分类 + 中文章流 + 右卡片栏）~~ —— **已改版（2026-11-17，两轮）**：
+    左栏 个人信息 / 文章分类 / 发布热力；中间放**置顶**文章（`article.is_top`，普通管理员在编辑器勾选，
+    **不设篇数上限**，是一条滚到底会显示「我是有底线的」的滚动屏）；右侧「全部文章」固定为紧凑列表
+    （排除置顶、右栏 400px 使中栏约为原来的 80%，自己一条独立滚动条）；顶栏「首页布局」只切中间（列表/网格）。
+    「精品」（`article.is_featured`，超管专设）**只是卡片徽标，不决定布局**。方案与两轮记录见
+    [计划-首页改版-2026-11-17.md](计划-首页改版-2026-11-17.md)（以 §十 为准）。
+    ⚠️ 需先执行 `blog-server/sql/featured-article.sql`（幂等加列 + 索引），否则精品字段恒为 null
 
 > 完成后请把对应报告移入 `archive/`，并更新本索引；建议清单类文档记得同步顶部「时效状态」块。
 

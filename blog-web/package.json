@@ -8,7 +8,10 @@
     "build": "nuxi build && node scripts/fix-output-symlinks.mjs",
     "generate": "nuxi generate",
     "preview": "nuxi preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:sfc": "node scripts/check-sfc.mjs",
+    "check:home": "node scripts/check-home.mjs",
+    "check:companion": "node scripts/check-companion.mjs && node scripts/check-companion-state.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",

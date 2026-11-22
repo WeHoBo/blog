@@ -6,13 +6,13 @@
         <span v-if="saveState.text" class="text-xs px-2 py-1 rounded" :class="saveState.cls">{{ saveState.text }}</span>
       </div>
       <div class="flex gap-2 flex-wrap">
-        <button @click="openPreview" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 transition" title="在新窗口预览草稿">预览</button>
-        <button v-if="articleId" @click="goRevisions" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 transition">版本历史</button>
+        <button v-if="!isAuthorMode" @click="openPreview" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 transition" title="在新窗口预览草稿">预览</button>
+        <button v-if="articleId && !isAuthorMode" @click="goRevisions" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 transition">版本历史</button>
         <button @click="save(0)" :disabled="saving" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 disabled:opacity-50 transition">
-          {{ saving ? '保存中…' : '保存草稿' }}
+          {{ saving ? '保存中…' : (isAuthorMode ? '存草稿' : '保存草稿') }}
         </button>
         <button @click="save(1)" :disabled="saving" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50 transition">
-          {{ saving ? '发布中…' : '发布' }}
+          {{ saving ? '提交中…' : (isAuthorMode ? '提交审核' : '发布') }}
         </button>
       </div>
     </div>
@@ -26,7 +26,7 @@
             <option :value="null">选择分类</option>
             <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
-          <button @click="quickCreateCategory" class="px-2 py-2 border rounded-lg text-sm hover:border-primary-500 hover:text-primary-500" title="新建分类">＋</button>
+          <button v-if="!isAuthorMode" @click="quickCreateCategory" class="px-2 py-2 border rounded-lg text-sm hover:border-primary-500 hover:text-primary-500" title="新建分类">＋</button>
         </div>
       </div>
 
@@ -36,7 +36,7 @@
           <p class="mt-1 text-xs" :class="slugHint.cls">{{ slugHint.text }}</p>
         </div>
         <input v-model="form.series" placeholder="系列名(可选)" aria-label="系列名" class="lg:w-40 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
-        <div class="flex flex-col gap-1">
+        <div v-if="!isAuthorMode" class="flex flex-col gap-1">
           <label for="article-publish-at" class="text-[11px] text-gray-500 dark:text-gray-400">
             发布时间<span class="text-primary-600 dark:text-primary-400"> *</span>
           </label>
@@ -44,15 +44,24 @@
             aria-label="发布时间（必填，同时用于首页热力图统计）"
             class="lg:w-56 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
         </div>
-        <label class="flex items-center gap-1 text-xs text-gray-500 lg:border lg:rounded-lg lg:px-3 lg:py-2 dark:border-gray-600">
+        <!-- 置顶只有后台能设；作者提交的文章一律进待审队列，字段在 AuthorArticleDTO 里根本不存在 -->
+        <label v-if="!isAuthorMode" class="flex items-center gap-1 text-xs text-gray-500 lg:border lg:rounded-lg lg:px-3 lg:py-2 dark:border-gray-600">
           <input type="checkbox" v-model="form.isTop" :true-value="1" :false-value="0" class="mr-1" /> 置顶
+        </label>
+        <!-- 精品：只有超管能设。它只是卡片上的一个质量徽标，**不决定首页布局**
+             （首页中间那栏由「置顶」驱动）。
+             后端 ArticleService#gateFeatured 会再判一次角色，这里只是不给入口。 -->
+        <label v-if="isSuper"
+          class="flex items-center gap-1 text-xs text-gray-500 lg:border lg:rounded-lg lg:px-3 lg:py-2 dark:border-gray-600"
+          title="精品只是一枚质量徽标，不改变首页布局">
+          <input type="checkbox" v-model="form.isFeatured" :true-value="1" :false-value="0" class="mr-1" /> 设为精品
         </label>
       </div>
 
       <div>
         <div class="flex items-center justify-between mb-1">
           <label class="text-sm text-gray-500">标签</label>
-          <div class="flex items-center gap-2">
+          <div v-if="!isAuthorMode" class="flex items-center gap-2">
             <input v-model="newTagName" placeholder="新标签名" class="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 w-28" @keyup.enter="quickCreateTag" />
             <button @click="quickCreateTag" class="px-2 py-1 border rounded text-xs hover:border-primary-500 hover:text-primary-500">＋ 新建</button>
           </div>
@@ -72,7 +81,7 @@
         <label class="text-sm text-gray-500 mb-1 block">封面图</label>
         <div class="flex gap-2">
           <input v-model="form.cover" placeholder="封面图URL" class="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
-          <button @click="mediaOpen = true" class="px-3 py-2 border rounded-lg text-sm hover:border-primary-500 hover:text-primary-500">素材库</button>
+          <button v-if="!isAuthorMode" @click="mediaOpen = true" class="px-3 py-2 border rounded-lg text-sm hover:border-primary-500 hover:text-primary-500">素材库</button>
           <label class="px-3 py-2 border-2 border-dashed rounded-lg text-xs cursor-pointer hover:border-primary-500 hover:text-primary-500 whitespace-nowrap flex items-center">
             <input type="file" accept="image/*" class="hidden" @change="uploadCover" />
             {{ coverUploading ? '上传中...' : '上传' }}
@@ -112,7 +121,7 @@
             <input type="file" accept="image/*" class="hidden" @change="insertImage" />
             📷 插图
           </label>
-          <button type="button" @click="mediaOpen = true" class="px-3 py-1 border rounded text-xs hover:border-primary-500 hover:text-primary-500">🖼 素材库</button>
+          <button v-if="!isAuthorMode" type="button" @click="mediaOpen = true" class="px-3 py-1 border rounded text-xs hover:border-primary-500 hover:text-primary-500">🖼 素材库</button>
           <!-- 导入 PDF：前端解析，文字按行重组、内嵌图片走上传接口进 OSS，结果插到光标处 -->
           <label class="px-3 py-1 border rounded text-xs cursor-pointer hover:border-primary-500 hover:text-primary-500" title="选择一个 PDF，自动转成 Markdown 正文">
             <input type="file" accept="application/pdf,.pdf" class="hidden" :disabled="pdfImporting" @change="importPdf" />
@@ -169,7 +178,7 @@
       </div>
     </div>
 
-    <MediaLibraryDialog :open="mediaOpen" @close="mediaOpen = false" @pick="onMediaPick" />
+    <MediaLibraryDialog v-if="!isAuthorMode" :open="mediaOpen" @close="mediaOpen = false" @pick="onMediaPick" />
   </div>
 </template>
 
@@ -181,15 +190,30 @@ import { languages } from '@codemirror/language-data'
 import { EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 
-const props = defineProps<{ articleId?: string | number }>()
+const props = defineProps<{
+  articleId?: string | number
+  /**
+   * 使用场景：
+   * - `admin`（默认）：后台管理员/超管，能发布、定时、置顶、看版本历史
+   * - `author`：投稿作者，只能存草稿/提交审核，接口走 `/author/articles`
+   *
+   * ⚠️ 这里**不写** definePageMeta：中间件和布局属于页面。
+   * 以前它被放在组件里（页面自己也声明了一遍，等于重复），
+   * 作者页复用这个编辑器时会被 `admin` 中间件弹回首页。
+   */
+  mode?: 'admin' | 'author'
+}>()
 
-definePageMeta({ middleware: 'admin', layout: 'admin' })
+/** 投稿作者模式：接口、按钮文案、可用字段全都不同 */
+const isAuthorMode = computed(() => props.mode === 'author')
 
 const { get, post, put } = useApi()
 const { toast, confirmDialog } = useFeedback()
 const { upload, uploadWithProgress, compressImage } = useUpload()
 const purgeCache = usePurgeCache()
 const router = useRouter()
+/** 「设为精品」勾选框只对超管渲染（mounted 后才置 true，避免 SSR 水合不一致） */
+const isSuper = useIsSuper()
 
 const categories = ref<any[]>([])
 const tags = ref<any[]>([])
@@ -232,6 +256,8 @@ const form = reactive({
   categoryId: null as number | null,
   tagIds: [] as number[],
   isTop: 0,
+  /** 精品（卡片徽标）：只有超管能改，非超管的 payload 里不出现这个字段 */
+  isFeatured: 0,
   series: '',
   slug: '',
   // 默认预填「现在」：发布时间是必填项，但绝大多数时候就是「此刻」，
@@ -328,7 +354,11 @@ async function checkSlug() {
   try {
     const excludeId = props.articleId ? Number(props.articleId) : undefined
     const qs = excludeId ? `?slug=${encodeURIComponent(slug)}&excludeId=${excludeId}` : `?slug=${encodeURIComponent(slug)}`
-    const res = await get<any>(`/article/slug-available${qs}`)
+    // 作者走自己的平行入口：后台那个 slug-available 是 hasRole('admin')，作者打过去必然 403
+    const url = isAuthorMode.value
+      ? `/author/slug-available${qs}`
+      : `/article/slug-available${qs}`
+    const res = await get<any>(url)
     slugState.value = res.data?.available ? 'ok' : 'taken'
   } catch {
     slugState.value = 'idle'
@@ -659,8 +689,69 @@ function onDrop(e: DragEvent) {
 
 // ============ 保存 / 自动保存 ============
 
-function buildPayload(status: number) {
+/**
+ * 作者模式的载荷：**只发 AuthorArticleDTO 里有的字段**。
+ * status / isTop / isFeatured / publishAt / userId 一个都不带 ——
+ * 后端那个 DTO 里本来也没有这些键，多发了只会被 Jackson 丢掉，
+ * 但"根本不发"更能说明意图：作者没有任何途径影响这几个值。
+ */
+function authorPayload() {
   return {
+    title: form.title,
+    summary: form.summary,
+    cover: form.cover,
+    contentMd: form.contentMd,
+    categoryId: form.categoryId,
+    tagIds: form.tagIds,
+    slug: form.slug
+  }
+}
+
+/**
+ * 作者的两个动作：存草稿 / 提交审核。没有"发布" ——
+ * 上线只能由超管在后台点通过，这一步是整套审核制的门槛。
+ */
+async function saveAuthor(submit: boolean) {
+  if (!form.title.trim()) {
+    toast('请输入标题', 'error')
+    return
+  }
+  if (submit && !form.contentMd.trim()) {
+    toast('提交审核前请填写正文；还没写完可以先「存草稿」', 'error')
+    return
+  }
+  if (submit) autoSummary()
+  saving.value = true
+  try {
+    const qs = `?submit=${submit}`
+    if (props.articleId) {
+      await put(`/author/articles/${props.articleId}${qs}`, authorPayload())
+    } else {
+      const res = await post<any>(`/author/articles${qs}`, authorPayload())
+      if (res?.code !== 200) {
+        toast(res?.message || '保存失败', 'error')
+        return
+      }
+      if (res.data?.id) {
+        ;(props as any).articleId = res.data.id
+        await router.replace(`/author/${res.data.id}`)
+      }
+    }
+    dirty = false
+    toast(submit ? '已提交审核，站长通过后就会上线' : '草稿已保存', 'success')
+    if (submit) {
+      // 停留一下让提示看得见，再回列表
+      setTimeout(() => router.push('/author'), 900)
+    }
+  } catch (e: any) {
+    toast(e.message || '保存失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+function buildPayload(status: number) {
+  const payload: Record<string, any> = {
     title: form.title,
     summary: form.summary,
     cover: form.cover,
@@ -673,6 +764,11 @@ function buildPayload(status: number) {
     publishAt: form.publishAt || null,
     status
   }
+  // ⚠️ 非超管**绝不能**带这个字段：后端把「传了 isFeatured」当作一次精品变更请求，
+  // 普通管理员编辑一篇已是精品的文章时若把原值一起提交，虽然会被丢弃，
+  // 但语义上很脏 —— 干脆不发，让后端走「不传 = 不改动」那条分支。
+  if (isSuper.value) payload.isFeatured = form.isFeatured
+  return payload
 }
 
 function autoSummary() {
@@ -683,6 +779,11 @@ function autoSummary() {
 
 async function save(status: number, autosave = false) {
   if (saving.value) return
+  // 作者模式完全走另一条路：没有"发布"，只有存草稿 / 提交审核
+  if (isAuthorMode.value) {
+    if (autosave) return
+    return saveAuthor(status === 1)
+  }
   if (!form.title.trim()) {
     toast('请输入标题', 'error')
     return
@@ -737,6 +838,9 @@ function markDirty() {
 
 function scheduleAutosave() {
   if (!props.articleId) return // 新建尚未拿到 id，不自动保存
+  // 作者模式不做自动保存：一次静默的 PUT 可能把「已发布」的文章又写一遍，
+  // 而作者最需要的是"我点了什么就发生什么"，别在背后改线上内容
+  if (isAuthorMode.value) return
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = setTimeout(async () => {
     autosaveTimer = null
@@ -792,7 +896,12 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 async function fetchArticle() {
   if (!props.articleId) return
   try {
-    const res = await get<any>(`/article/${props.articleId}`)
+    // 作者必须走 /author/articles/{id}：公开的 /article/{id} 只返回已发布的文章，
+    // 作者编辑自己的草稿时会 404，看起来像"文章丢了"
+    const url = isAuthorMode.value
+      ? `/author/articles/${props.articleId}`
+      : `/article/${props.articleId}`
+    const res = await get<any>(url)
     if (res.code === 200 && res.data) {
       const a = res.data.article || res.data
       form.title = a.title || ''
@@ -802,6 +911,7 @@ async function fetchArticle() {
       form.categoryId = a.categoryId ?? null
       form.tagIds = (res.data.tags || []).map((t: any) => t.id)
       form.isTop = a.isTop ?? 0
+      form.isFeatured = a.isFeatured ?? 0
       form.series = a.series || ''
       form.slug = a.slug || ''
       // 老文章的 publish_at 是 NULL（旧逻辑发布时会清空），这里回落到 create_time：

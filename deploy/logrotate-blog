@@ -1,0 +1,35 @@
+# =============================================================================
+# 日志轮转（nginx + journald 侧）
+# -----------------------------------------------------------------------------
+# 放哪里：/etc/logrotate.d/blog
+#   权限：644 root:root
+#
+# 🔴 为什么这里**故意没有** /opt/blog/logs：
+#   应用日志（blog-api.log / -access / -error）已经由 logback 的
+#   SizeAndTimeBasedRollingPolicy 在做「按天 + 按大小 + 保留天数 + 总量上限」的滚动与删除。
+#   如果这里再对同一批文件做一次 logrotate，就是两套清理逻辑打架：
+#     logrotate 先把 blog-api.log 改名 → logback 手里的文件句柄还指着旧 inode
+#     → logback 继续往一个"已经被改名"的文件里写，而新文件没人写
+#     → 结果就是日志看起来"突然不更新了"，或者 gz 被删到只剩一半。
+#   **二选一**：应用日志归 logback（改 XML 就行），nginx/journald 归 logrotate。
+#
+# 生效方式：logrotate -d /etc/logrotate.d/blog   # 先 dry-run 看动作
+#          logrotate -f /etc/logrotate.d/blog  # 手动跑一次
+# =============================================================================
+
+/var/log/nginx/*.log {
+    daily
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    # 用 copytruncate 会丢正在写的行；nginx 支持信号重开，所以用 create + 信号
+    create 0640 nginx adm
+    sharedscripts
+    postrotate
+        if [ -f /run/nginx.pid ]; then
+            kill -USR1 $(cat /run/nginx.pid)
+        fi
+    endscript
+}

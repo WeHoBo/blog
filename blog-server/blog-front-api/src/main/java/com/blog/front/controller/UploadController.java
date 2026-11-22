@@ -75,7 +75,17 @@ public class UploadController {
         return Result.ok(url);
     }
 
-    @PreAuthorize("hasRole('admin')")
+    /**
+     * 上传图片 / 附件（素材库入口）。
+     *
+     * <p>⚠️ 这里放行 {@code author} 是有意的：作者在自己的写作后台里要传封面和正文插图，
+     * 而编辑器用的就是这一个接口。不放行的话作者一传图就 403，整套投稿功能没法用。
+     *
+     * <p>代价是作者传的图也会写进 {@code upload_file} 表，会出现在超管的素材库里 ——
+     * 这是可接受的（那张表本来就是"站内上传过的文件"清单），
+     * 比单独再开一个不写表的接口要简单得多。
+     */
+    @PreAuthorize("hasAnyRole('admin','author')")
     @PostMapping
     public Result<String> upload(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
