@@ -240,6 +240,8 @@ let syncing = false
 let dragging = false
 let autosaveTimer: any = null
 let dirty = false
+/** 自动保存失败只提示一次，避免每 5 秒弹一个 toast */
+let autosaveFailed = false
 
 /** datetime-local 需要本地时区的 `YYYY-MM-DDTHH:mm`（toISOString 会给 UTC，差 8 小时） */
 function nowLocalInput(): string {
@@ -262,7 +264,15 @@ const form = reactive({
   slug: '',
   // 默认预填「现在」：发布时间是必填项，但绝大多数时候就是「此刻」，
   // 每次手动选一遍纯属浪费；要改再改。
-  publishAt: nowLocalInput()
+  publishAt: nowLocalInput(),
+  /**
+   * 这篇稿子当前的状态（0 草稿 / 1 已发布 / 2 待审 / 3 驳回）。
+   * ⚠️ 自动保存必须沿用它，不能写死 0 ——
+   * 编辑一篇已发布文章时，写死 0 等于「把已发布的打回草稿」。
+   * 这个 bug 以前被「0 + 过去时间 = 视同发布」掩盖着（结果恰好仍是已发布），
+   * 2026-11-23 修掉那个逻辑后，它就会真的把线上文章撤下来。
+   */
+  status: 0
 })
 
 const saveState = computed(() => {
@@ -724,18 +734,20 @@ async function saveAuthor(submit: boolean) {
   saving.value = true
   try {
     const qs = `?submit=${submit}`
-    if (props.articleId) {
-      await put(`/author/articles/${props.articleId}${qs}`, authorPayload())
-    } else {
-      const res = await post<any>(`/author/articles${qs}`, authorPayload())
-      if (res?.code !== 200) {
-        toast(res?.message || '保存失败', 'error')
-        return
-      }
-      if (res.data?.id) {
-        ;(props as any).articleId = res.data.id
-        await router.replace(`/author/${res.data.id}`)
-      }
+    // ⚠️ 这里原来只有「新建」判了 code，「更新」把返回值直接吞了 ——
+    // 提交审核失败（标题为空被拒、URL 冲突、稿件被驳回后锁定…）也会弹
+    // 「已提交审核，站长通过后就会上线」，作者以为交上去了，站长的待审列表里根本没有。
+    // 2026-11-23 修。
+    const res: any = props.articleId
+      ? await put(`/author/articles/${props.articleId}${qs}`, authorPayload())
+      : await post<any>(`/author/articles${qs}`, authorPayload())
+    if (res?.code !== 200) {
+      toast(res?.message || '保存失败，内容还在编辑器里，请重试', 'error')
+      return
+    }
+    if (!props.articleId && res.data?.id) {
+      ;(props as any).articleId = res.data.id
+      await router.replace(`/author/${res.data.id}`)
     }
     dirty = false
     toast(submit ? '已提交审核，站长通过后就会上线' : '草稿已保存', 'success')
@@ -761,7 +773,7 @@ function buildPayload(status: number) {
     isTop: form.isTop,
     series: form.series,
     slug: form.slug,
-    publishAt: form.publishAt || null,
+    publishAt: resolvePublishAt(status),
     status
   }
   // ⚠️ 非超管**绝不能**带这个字段：后端把「传了 isFeatured」当作一次精品变更请求，
@@ -769,6 +781,25 @@ function buildPayload(status: number) {
   // 但语义上很脏 —— 干脆不发，让后端走「不传 = 不改动」那条分支。
   if (isSuper.value) payload.isFeatured = form.isFeatured
   return payload
+}
+
+/**
+ * 发布时间在这个系统里兼职两个角色，必须在这里分开 ——
+ * 分不开的后果就是「点保存草稿，文章直接公开了」（2026-11-23 修掉的 P0）：
+ *
+ *   status=1            → 立即发布，publishAt 就是这篇文章的**发布时间**
+ *   status=0 + 未来时间  → 定时发布，publishAt 是**计划发布时刻**，交给后端的心跳任务翻状态
+ *   status=0 + 过去/空   → 纯草稿，**必须传 null**
+ *
+ * 第三条是关键：编辑器默认把 publishAt 填成「此刻」，提交时那一刻已经过去，
+ * 过去的时间 + status=0 会被后端理解成「补发一篇旧文」，直接改成已发布。
+ * 传 null 从源头掐断；后端 applyPublishSchedule 也会再兜一次（双保险）。
+ */
+function resolvePublishAt(status: number): string | null {
+  if (status === 1) return form.publishAt || null
+  const at = form.publishAt
+  if (!at) return null
+  return new Date(at).getTime() > Date.now() ? at : null
 }
 
 function autoSummary() {
@@ -803,16 +834,32 @@ async function save(status: number, autosave = false) {
   }
   saving.value = true
   try {
-    if (props.articleId) {
-      await put(`/article/${props.articleId}?autosave=${autosave}`, buildPayload(status))
-    } else {
-      const res = await post('/article', buildPayload(status))
-      // 新建成功后拿到 id，之后的自动保存都走更新
-      if (res.code === 200 && res.data?.id) {
-        ;(props as any).articleId = res.data.id
-        await router.replace(`/admin/articles/${res.data.id}`)
+    // ⚠️ 必须判 res.code：后端业务失败返回的是 HTTP 200 + code=400（slug 冲突、
+    // 标题为空、无权限…），useApi 不抛错。这里以前 PUT 的返回值根本没接，
+    // 然后无条件 dirty=false + 弹「已保存」—— 用户以为存下了，实际一个字没落库，
+    // 而且未保存标记被清掉，他再也不会收到提醒。2026-11-23 修。
+    const res: any = props.articleId
+      ? await put(`/article/${props.articleId}?autosave=${autosave}`, buildPayload(status))
+      : await post('/article', buildPayload(status))
+    if (res?.code !== 200) {
+      if (!autosave) {
+        toast(res?.message || '保存失败，内容还在编辑器里，请重试', 'error')
+      } else if (!autosaveFailed) {
+        // 自动保存每 5 秒重试一次，失败时只提示一遍，别把屏幕刷满
+        autosaveFailed = true
+        toast('自动保存失败，请手动点一次保存', 'error')
       }
+      return
     }
+    autosaveFailed = false
+    if (!props.articleId && res.data?.id) {
+      // 新建成功后拿到 id，之后的自动保存都走更新
+      ;(props as any).articleId = res.data.id
+      await router.replace(`/admin/articles/${res.data.id}`)
+    }
+    // 同步当前状态：否则「草稿 → 点发布 → 继续改一个字」时，
+    // 5 秒后的自动保存还会带着旧状态 0，把刚发布的文章又打回草稿
+    form.status = status
     dirty = false
     if (!autosave) {
       // 发布/更新后立刻清页面缓存：首页缓 20s、详情页缓 10s，
@@ -846,7 +893,8 @@ function scheduleAutosave() {
     autosaveTimer = null
     if (!dirty) return
     try {
-      await save(0, true)
+      // 保持原状态自动保存：已发布的仍是已发布，草稿仍是草稿
+      await save(form.status, true)
     } catch {}
   }, 5000)
 }
@@ -918,6 +966,7 @@ async function fetchArticle() {
       // 既不留下空值（发布时间必填），也保证「编辑一下老文章」不会把它的发布日期改成今天
       // ——否则热力图上那篇文章会凭空跳到今天。
       form.publishAt = (a.publishAt || a.createTime || '').replace(' ', 'T').slice(0, 16)
+      form.status = a.status ?? 0
     }
   } catch (e: any) {
     toast('加载文章失败: ' + (e.message || '未知错误'), 'error')

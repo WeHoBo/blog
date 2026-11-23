@@ -290,37 +290,71 @@ public class ArticleService {
         return article;
     }
 
-    /** 缓存优先地取一篇公开文章（不含阅读数逻辑） */
+    /**
+     * 缓存优先地取一篇公开文章（不含阅读数逻辑）。
+     * <p>
+     * Redis 故障不能拖垮阅读：读缓存失败就回源数据库，写缓存失败只丢缓存不丢请求。
+     * 聚合缓存（archive / series）一直有这个兜底，详情链路 2026-11-23 才补齐 ——
+     * 在此之前 Redis 一挂，所有文章详情直接 500，而数据库其实好好的。
+     */
     private Article loadPublicArticle(Long id) {
         String key = ArticleCacheKeys.article(id);
-        String viewKey = ArticleCacheKeys.viewCount(id);
-        Article article = (Article) redisTemplate.opsForValue().get(key);
-        if (article == null) {
-            article = articleMapper.selectById(id);
-            if (article == null || !isPublicArticle(article)) {
+        Article cached = null;
+        try {
+            cached = (Article) redisTemplate.opsForValue().get(key);
+        } catch (Exception e) {
+            log.warn("[文章详情] 缓存读取失败，回源数据库 id={}: {}", id, e.toString());
+        }
+        if (cached != null) {
+            if (!isPublicArticle(cached)) {
+                try {
+                    redisTemplate.delete(key);
+                } catch (Exception ignored) {
+                    // 缓存删不掉不影响判定：下面照样按 404 处理
+                }
                 throw new BusinessException(404, "文章不存在");
             }
-            redisTemplate.opsForValue().set(key, article, ArticleCacheKeys.ARTICLE_TTL);
-            redisTemplate.opsForValue().set(viewKey, 0, ArticleCacheKeys.ARTICLE_TTL);
-        } else if (!isPublicArticle(article)) {
-            redisTemplate.delete(key);
+            return cached;
+        }
+        Article article = articleMapper.selectById(id);
+        if (article == null || !isPublicArticle(article)) {
             throw new BusinessException(404, "文章不存在");
+        }
+        try {
+            redisTemplate.opsForValue().set(key, article, ArticleCacheKeys.ARTICLE_TTL);
+            redisTemplate.opsForValue().set(ArticleCacheKeys.viewCount(id), 0,
+                    ArticleCacheKeys.ARTICLE_TTL);
+        } catch (Exception e) {
+            log.warn("[文章详情] 缓存写入失败，本次不回填 id={}: {}", id, e.toString());
         }
         return article;
     }
 
-    /** 阅读数 +1：数据库原子自增 + Redis 窗口计数器，并把最新值写回传入的 article */
+    /**
+     * 阅读数 +1，并把自增后的值写回传入的 article。
+     * <p>
+     * ⚠️ 以前是「DB 值 + Redis 窗口增量」，那是重复计数：
+     * 传进来的 article 来自 selectById，是**自增前的**最新 DB 值，
+     * 再从 key 创建起累计一个 delta 加上去，同一段时间被数了两遍。
+     * 具体表现（DB=1000，10 分钟内访问 20 次）：第 20 次显示 1019，实际 1020。
+     * 而且 ARTICLE_TTL 到期 delta 归零，阅读数会往回跳 —— 用户能看见。
+     * <p>
+     * 正确的口径：selectById 读到的是自增前的值，+1 就是自增后的值。
+     * Redis 计数器仍然要自增，但只服务于 {@link #currentViewCount} ——
+     * 那条走的是缓存快照 base + 窗口增量，口径本身是对的。
+     * <p>
+     * 已知代价：并发下两个请求读到同一个 base，显示会少 1（DB 侧仍准确）。
+     * 要绝对准确得在自增后回查一次单列，个人博客不值得多这一次查询。
+     */
     private void applyViewCount(Long id, Article article) {
-        String viewKey = ArticleCacheKeys.viewCount(id);
+        Integer before = article.getViewCount();
         // 持久化：单条主键 UPDATE 原子自增（数据库始终是浏览量的真实来源）
         articleMapper.update(null, new LambdaUpdateWrapper<Article>()
                 .eq(Article::getId, id)
                 .setSql("view_count = IFNULL(view_count, 0) + 1"));
-        // 展示：用 Redis 计数器自增，免去每次访问都回查一次数据库
-        // 展示值 = 缓存加载时的 DB 基准值 + 窗口内增量，与数据库保持同步
-        Long delta = redisTemplate.opsForValue().increment(viewKey);
-        int base = article.getViewCount() == null ? 0 : article.getViewCount();
-        article.setViewCount(base + (delta == null ? 1 : delta.intValue()));
+        // Redis 计数器照常自增：currentViewCount 靠它给缓存快照算增量，断了那边就静止
+        redisTemplate.opsForValue().increment(ArticleCacheKeys.viewCount(id));
+        article.setViewCount((before == null ? 0 : before) + 1);
     }
 
     /** 只读地算出当前展示值（基准值 + Redis 窗口增量），不写库、不自增 */
@@ -1443,12 +1477,18 @@ public class ArticleService {
      * 落定发布状态与定时时间。
      * <p>
      * 规则：status=1 → 立即发布，**保留**用户选的发布时间（没选就取当前时间）；
-     * status=0 且 publishAt 在未来 → 挂定时；status=0 且 publishAt 已过 → 视同立即发布。
+     * status=0 且 publishAt 在未来 → 挂定时，到点由 ScheduledPublishJob 翻状态；
+     * status=0 且 publishAt 为空或已过 → 纯草稿，并把 publishAt 清空。
+     * <p>
+     * ⚠️ 第三条曾经是「视同立即发布」，那是一个内容安全事故：
+     * 编辑器默认把发布时间预填成「此刻」，提交时那一刻必然已经过去，
+     * 于是「保存草稿」会把没写完的文章直接公开（2026-11-23 修）。
+     * 清空 publishAt 同时掐掉第二个入口 —— ScheduledPublishJob 只扫 publish_at 非空的记录。
      * <p>
      * ⚠️ 这里曾经是「status=1 就把 publishAt 清成 NULL」。那会让「发布时间」这个字段
      * 对已发布文章永远为空，于是发布热力图 / 卡片日期只能退回 create_time ——
      * 用户明明选了时间却不生效。现在它的语义是「这篇文章的发布时间」，
-     * 草稿阶段同一个字段兼职「定时发布时刻」，两者不冲突（草稿还没发布，没有发布时间）。
+     * 草稿阶段的未来时刻兼职「定时发布时刻」。
      */
     private void applyPublishSchedule(Article article, ArticleDTO dto) {
         Integer status = dto.getStatus() == null ? 0 : dto.getStatus();
@@ -1462,10 +1502,11 @@ public class ArticleService {
         if (publishAt == null) {
             article.setPublishAt(null);
         } else if (publishAt.isAfter(LocalDateTime.now())) {
+            // 计划时刻在未来 —— 挂定时，别在这里改状态
             article.setPublishAt(publishAt);
         } else {
-            article.setStatus(1);
-            article.setPublishAt(publishAt);
+            // 过去的发布时间 + 草稿 = 用户只想存草稿。清空 publishAt 而不是"视同发布"。
+            article.setPublishAt(null);
         }
     }
 

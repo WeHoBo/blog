@@ -509,8 +509,21 @@ class ArticleServiceTest {
         assertNotNull(captor.getValue().getPublishAt());
     }
 
+    /**
+     * ⚠️ 这条以前叫 create_scheduledInPast_publishesImmediately，断言
+     * 「过去时间 + status=0 ⇒ 立即发布」—— 那正是 2026-11-23 修的 P0 事故本身：
+     * 编辑器默认把发布时间预填成「此刻」，提交时那一刻必然已过，
+     * 于是「保存草稿」会把没写完的文章直接公开给访客。
+     * <p>
+     * 现在的语义：过去时间 + status=0 ⇒ 纯草稿，并且清空 publishAt。
+     * 清空不是顺手做的 —— ScheduledPublishJob 只扫 publish_at 非空的记录，
+     * 不清空的话它会在 60 秒内把这篇草稿又翻成已发布，等于补了前门漏后门。
+     * <p>
+     * 「补发一篇旧文」的合法场景不受影响：那时 status=1，见
+     * {@link #create_publishWithPastTime_keepsChosenTime()}。
+     */
     @Test
-    void create_scheduledInPast_publishesImmediately() {
+    void create_draftWithPastTime_staysDraft() {
         LocalDateTime chosen = LocalDateTime.now().minusHours(1);
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("时间已过");
@@ -523,11 +536,29 @@ class ArticleServiceTest {
 
         ArgumentCaptor<Article> captor = ArgumentCaptor.forClass(Article.class);
         verify(articleMapper).insert(captor.capture());
-        assertEquals(1, captor.getValue().getStatus(), "定时时间已过应视同立即发布");
-        // 旧断言是 assertNull(publishAt)：那时 publish_at 只表示「未来的定时时刻」，
-        // 发布时会被清掉。现在它同时是「发布时间」（首页热力图与卡片日期都靠它），
-        // 所以已发布文章必须保留用户选的时间，不能清成 NULL。
-        assertEquals(chosen, captor.getValue().getPublishAt(), "立即发布后应保留用户选的发布时间");
+        assertEquals(0, captor.getValue().getStatus(),
+                "过去时间 + 草稿状态必须仍然是草稿，不能自动发布");
+        assertNull(captor.getValue().getPublishAt(),
+                "草稿要清空 publishAt，否则 ScheduledPublishJob 一分钟后会把它翻成已发布");
+    }
+
+    @Test
+    void create_publishWithPastTime_keepsChosenTime() {
+        LocalDateTime chosen = LocalDateTime.now().minusDays(3);
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("补发旧文");
+        dto.setStatus(1);
+        dto.setContentMd("正文");
+        dto.setPublishAt(chosen);
+
+        ArticleService s = service();
+        s.create(dto, 1L);
+
+        ArgumentCaptor<Article> captor = ArgumentCaptor.forClass(Article.class);
+        verify(articleMapper).insert(captor.capture());
+        assertEquals(1, captor.getValue().getStatus(), "status=1 就是立即发布");
+        assertEquals(chosen, captor.getValue().getPublishAt(),
+                "补发旧文必须保留用户选的过去时间，别被草稿规则误伤");
     }
 
     @Test

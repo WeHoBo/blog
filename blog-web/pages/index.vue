@@ -23,7 +23,7 @@
                 <span v-for="t in focusTags" :key="t" class="text-xs px-2.5 py-1 rounded-full theme-chip">{{ t }}</span>
               </div>
             </div>
-            <!-- 三个按钮必须允许换行：加了「申请管理员发布文章」之后总宽超过 1.3fr 栏宽，
+            <!-- 三个按钮必须允许换行：加了「申请成为作者」之后总宽超过 1.3fr 栏宽，
                  不换行会把 Hero 撑破（窄屏更是直接溢出）。 -->
             <div class="flex flex-wrap items-center gap-2.5 mt-4">
               <a href="#articles" class="px-4 py-1.5 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-medium hover:opacity-85 transition">开始阅读</a>
@@ -32,7 +32,10 @@
                    已有权限的人不显示，免得点进来只看到一句「你已经有权限了」。 -->
               <button v-if="applyVisible" type="button" @click="openApply"
                 class="px-4 py-1.5 rounded-full border border-primary-300 dark:border-primary-700 text-primary-600 dark:text-primary-400 text-xs font-medium whitespace-nowrap hover:bg-primary-50 dark:hover:bg-primary-900/20 transition">
-                申请管理员发布文章
+                <!-- 实际授予的是 author（作者），不是 admin。
+                     原来写「申请管理员发布文章」，用户点进去以为能拿管理权限，
+                     通过后只是获得「写文章 + 提交审核」的资格。2026-11-23 改。 -->
+                申请成为作者
               </button>
             </div>
           </div>
@@ -327,13 +330,13 @@
             </div>
             <div class="p-3">
               <button @click="currentCategory = undefined; mobileCatOpen = false"
-                :class="!currentCategory ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'"
+                :class="!currentCategory ? 'bg-primary-600/10 dark:bg-primary-400/15 text-primary-800 dark:text-primary-300' : 'text-gray-600 dark:text-gray-400'"
                 class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium transition flex items-center gap-2">
                 <span class="flex-1">全部文章</span>
               </button>
               <template v-for="cat in categoryTree" :key="cat.id">
                 <button @click="selectCategory(cat); mobileCatOpen = false"
-                  :class="currentCategory === cat.id ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'"
+                  :class="currentCategory === cat.id ? 'bg-primary-600/10 dark:bg-primary-400/15 text-primary-800 dark:text-primary-300' : 'text-gray-600 dark:text-gray-400'"
                   class="w-full text-left px-4 py-2.5 rounded-xl text-sm transition flex items-center gap-2 mt-0.5">
                   <span v-html="catIcon(cat.name)" class="flex-shrink-0"></span>
                   <span class="flex-1">{{ cat.name }}</span>
