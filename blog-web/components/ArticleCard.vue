@@ -9,7 +9,7 @@
     <!-- 精品标记：顶部 2px 主题色细线。
          只靠标题前那个小徽章，一屏扫下来和普通文章几乎没差别；
          加一道通栏细线之后，「这是精选」在余光里就能读到，而且不抢正文。
-         右栏「全部文章」用的是 ArticleRow（紧凑行），没有这条线 —— 两边天然区分。 -->
+         右栏「最新」用的是 ArticleRow（紧凑行），没有这条线 —— 两边天然区分。 -->
     <span v-if="article.isFeatured" class="absolute inset-x-0 top-0 h-[2px] bg-primary-600/55 z-10" aria-hidden="true"></span>
     <!-- 网格模式：顶部插图 + 下方信息 -->
     <template v-if="layout === 'grid'">

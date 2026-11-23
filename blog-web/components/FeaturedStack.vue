@@ -22,8 +22,9 @@
 
     <template v-else>
       <!-- 折叠态：两张叠压。高度写死，否则第二张的偏移量算不准、
-           展开切换时整块横幅会跟着抖。 -->
-      <div v-if="!open" class="relative" style="height: 60px">
+           展开切换时整块横幅会跟着抖。
+           ⚠️ 74 = ArticleRow 的 68px + 6px 偏移，改其中一边必须同步另一边。 -->
+      <div v-if="!open" class="relative" style="height: 74px">
         <!-- 后一张先渲染 → 天然压在下面 -->
         <div v-if="second" class="absolute inset-x-0 top-0">
           <ArticleRow :article="second" with-top-offset />

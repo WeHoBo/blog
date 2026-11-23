@@ -1,5 +1,9 @@
 ﻿<template>
-  <div class="max-w-7xl mx-auto">
+  <!-- 1360 而不是默认的 1280（max-w-7xl）：1920 屏上 7xl 两侧各留 320px，
+       中间栏被压到 624px，列表卡片的摘要 line-clamp-2 常断在半句。
+       加宽 80px 全部给了中栏（左右两栏与栏间距不变），中栏 624 → 704。
+       ⚠️ 只在 ≥1360 视口真正生效；1280–1359 区间仍是中栏 624，这是预期的。 -->
+  <div class="max-w-[1360px] mx-auto">
     <!-- 轻量 Hero：左侧问候 / 中间置顶堆叠 / 右侧热门标签 + 源码入口 -->
     <div class="px-4 pt-6 pb-1 lg:px-0">
       <div class="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-paper px-6 sm:px-10 py-8 relative overflow-hidden">
@@ -124,7 +128,7 @@
             <!-- 全部 -->
             <button @click="currentCategory = undefined"
               :class="!currentCategory
-                ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 border-l-2 border-primary-600'
+                ? 'bg-primary-600/10 dark:bg-primary-400/15 text-primary-800 dark:text-primary-300 border-l-2 border-primary-600'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
               class="w-full text-left px-4 py-2 text-sm font-medium transition flex items-center gap-2">
               <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z"/></svg>
@@ -150,7 +154,7 @@
                 <div v-if="cat.children && cat.children.length && isExpanded(cat.id)" class="pb-1">
                   <button v-for="child in cat.children" :key="child.id" @click="currentCategory = child.id"
                     :class="currentCategory === child.id
-                      ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 border-l-2 border-primary-600'
+                      ? 'bg-primary-600/10 dark:bg-primary-400/15 text-primary-800 dark:text-primary-300 border-l-2 border-primary-600'
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'"
                     class="w-full text-left pl-9 pr-3 py-1.5 text-sm transition flex items-center gap-2">
                     <span class="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600 flex-shrink-0"></span>
@@ -191,7 +195,7 @@
             <span v-if="keyword && !loading" class="text-xs font-normal text-gray-400">{{ totalMatched }} 篇</span>
             <span v-else-if="!filtered && featured.length" class="text-xs font-normal text-gray-400">{{ featured.length }} 篇</span>
           </h2>
-          <!-- 只切中间：右侧「全部文章」固定为列表面形态，不跟着变 -->
+          <!-- 只切中间：右侧「最新」固定为列表面形态，不跟着变 -->
           <button v-if="!filtered" @click="toggleHomeSwap"
             :title="homeSwapped ? '把中间切回列表' : '把中间切成网格'"
             class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-400 transition active:scale-95">
@@ -252,12 +256,12 @@
           </Transition>
         </ScrollPane>
 
-        <!-- 窄屏（<1280px）拿不到右栏，这里补一份「全部文章」。
+        <!-- 窄屏（<1280px）拿不到右栏，这里补一份「最新」。
              手机上关掉内滚动：页面本身能滚，再套一层会让手指滚不动。 -->
         <section v-if="showSide" class="xl:hidden mt-8">
           <h2 class="text-base font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-3">
             <span class="w-1 h-5 bg-primary-600 rounded-full"></span>
-            全部文章
+            最新
             <span class="text-xs font-normal text-gray-400">{{ articles.length }} 篇</span>
           </h2>
           <ScrollPane :scrollable="false" :count="articles.length">
@@ -268,7 +272,7 @@
         </section>
       </main>
 
-      <!-- Right sidebar: 全部文章，固定列表面（紧凑行），自己的滚动条 -->
+      <!-- Right sidebar: 最新，固定列表面（紧凑行），自己的滚动条 -->
       <aside v-if="showSide" class="hidden xl:block w-[25rem] flex-shrink-0">
         <div class="border-l border-gray-200/70 dark:border-gray-700/70 pl-6">
           <div class="flex items-baseline justify-between mb-2.5">
@@ -366,7 +370,7 @@ const router = useRouter()
 
 /**
  * 首页一次取全量，不做分页：
- * 中间是「滚动屏」（滚到底有底线），右边是「全部文章」的固定列表，
+ * 中间是「滚动屏」（滚到底有底线），右边是「最新」的固定列表，
  * 两栏都要能一路滚到底，分页会把「我是有底线的」这个设计破坏掉。
  * ⚠️ 上限 100：站内文章超过 100 篇时右栏会被截断，那时需要改成「加载更多」。
  */
@@ -396,7 +400,7 @@ const filtered = computed(() => !!keyword.value || !!currentCategory.value || !!
 
 /** 中栏：常态是精品，筛选态是结果 */
 const centerArticles = computed(() => (filtered.value ? articles.value : featured.value))
-/** 右栏与窄屏「全部文章」：筛选态让位给中栏，不重复展示 */
+/** 右栏与窄屏「最新」：筛选态让位给中栏，不重复展示 */
 const showSide = computed(() => !filtered.value)
 
 /** 中栏形态：false = 列表，true = 网格。右侧固定列表，不参与互换 */
@@ -544,7 +548,7 @@ function catBtnClass(cat: any) {
   const active = currentCategory.value === cat.id
   const base = 'w-full text-left px-3 py-2 text-sm transition flex items-center gap-1.5 border-l-2 border-transparent'
   return active
-    ? base + ' bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-gray-100 border-primary-600'
+    ? base + ' bg-primary-600/10 dark:bg-primary-400/15 text-primary-800 dark:text-primary-300 border-primary-600'
     : base + ' text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
 }
 
@@ -599,10 +603,15 @@ const sideCats = computed(() =>
     .slice(0, 5)
 )
 
+/**
+ * 右栏标题。未选分区时叫「最新」而不是「全部文章」——
+ * 这份列表是 featured=0 的最新时间流（已排除精品，与中栏数据不重叠），
+ * 叫「全部」会让访客以为中栏是它的子集，也和 /archive 的「全部文章」撞名。
+ */
 const sideCatName = computed(() => {
-  if (sideCatId.value === null) return '全部文章'
+  if (sideCatId.value === null) return '最新'
   const hit = sideCats.value.find((c: any) => c.id === sideCatId.value)
-  return hit ? hit.name : '全部文章'
+  return hit ? hit.name : '最新'
 })
 
 /** 「全部」用 SSR 那份时间流；选了分区才用另取的那份 */

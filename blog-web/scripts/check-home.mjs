@@ -108,7 +108,9 @@ check('左栏顺序：个人信息 → 分类 → 热力图', () => {
 })
 
 check('中间是滚动屏，不再分页', () => {
-  must(idx, '<ScrollPane :max-height="620"', '中栏必须包一层滚动屏')
+  // 不匹配整个标签：中栏那个 ScrollPane 带 v-else（只在非筛选态渲染），
+  // 写成 '<ScrollPane :max-height="620"' 永远匹配不到 —— 这条断言曾因此长期误报
+  must(idx, ':max-height="620"', '中栏必须包一层滚动屏（620 与右栏 sidePaneMax 对齐）')
   must(idx, ':count="centerArticles.length"', '滚动屏要知道条数以决定画不画底线')
   mustNot(idx, '<Pagination', '分页会把「我是有底线的」设计破坏掉')
 })
@@ -200,7 +202,7 @@ check('内滚动只在 ≥1280px 生效（窄屏再套一层会滚不动）', ()
 console.log('\n紧凑行组件')
 
 check('右栏与置顶堆叠共用同一套尺寸', () => {
-  must(row, 'h-[54px]', '行高固定，两处才对齐')
+  must(row, 'h-[68px]', '行高固定，两处才对齐（横幅折叠态 74px = 68 + 6px 偏移）')
   must(row, 'withTopOffset', '叠压态靠这个 prop 偏移')
   must(idx, '<ArticleRow', '首页确实在用')
   must(stack, '<ArticleRow', '堆叠也在用')
@@ -221,8 +223,11 @@ check('精品徽标与置顶徽标并存', () => {
 })
 
 check('列表与网格两种形态都要画徽标（曾漏过：列表只有精品没有置顶）', () => {
-  const top = count(card, 'article.isTop')
-  const feat = count(card, 'article.isFeatured')
+  // 按徽标特有的配色计数，不按 article.isFeatured 计数 ——
+  // isFeatured 还会命中封面边框和顶部 2px 细线（共 4 处），
+  // 按它统计的话「漏画徽标」会被细线掩盖，口径会越来越歪
+  const top = count(card, 'text-[10px] bg-primary-600 text-white')
+  const feat = count(card, 'text-[10px] bg-primary-600/10 text-primary-700')
   if (top !== 2) throw new Error(`置顶徽标应出现 2 次（列表+网格），实际 ${top} 次`)
   if (feat !== 2) throw new Error(`精品徽标应出现 2 次（列表+网格），实际 ${feat} 次`)
 })
