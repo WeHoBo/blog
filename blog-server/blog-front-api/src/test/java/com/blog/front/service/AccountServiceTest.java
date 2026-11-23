@@ -11,6 +11,7 @@ import com.blog.common.dto.SmsLoginDTO;
 import com.blog.common.entity.User;
 import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.UserMapper;
+import com.blog.common.security.TokenRevocationService;
 import com.blog.common.utils.JwtUtils;
 import com.blog.common.vo.LoginVO;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -72,7 +73,8 @@ class AccountServiceTest {
         when(redis.opsForValue()).thenReturn(valueOps);
         when(jwtUtils.generateToken(any(), any(), any())).thenReturn("test-token");
 
-        service = new AccountService(userMapper, passwordEncoder, jwtUtils, smsCodeService, redis);
+        service = new AccountService(userMapper, passwordEncoder, jwtUtils, smsCodeService, redis,
+                mock(TokenRevocationService.class));
     }
 
     // ==================== 注册 ====================

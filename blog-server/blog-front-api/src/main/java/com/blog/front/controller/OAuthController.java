@@ -2,6 +2,7 @@ package com.blog.front.controller;
 
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.blog.common.dto.OAuthUser;
 import com.blog.common.dto.Result;
@@ -13,6 +14,7 @@ import com.blog.common.oauth.GiteeOAuthProvider;
 import com.blog.common.oauth.HuaweiOAuthProvider;
 import com.blog.common.oauth.OAuthProvider;
 import com.blog.common.utils.JwtUtils;
+import com.blog.common.vo.LoginVO;
 import com.blog.common.vo.LoginVO;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +37,13 @@ public class OAuthController {
     /** OAuth CSRF 防护：authorize 阶段下发 state，回调阶段一次性校验 */
     private static final String STATE_KEY_PREFIX = "oauth:state:";
     private static final Duration STATE_TTL = Duration.ofMinutes(5);
+
+    /**
+     * 一次性授权码：回调地址里只带它，不直接带 JWT。
+     * 60 秒足够「重定向到前端页 + 页面加载 + 发起兑换」，又不至于让日志里翻出来的值有利用价值。
+     */
+    private static final String EXCHANGE_KEY_PREFIX = "oauth:code:";
+    private static final Duration EXCHANGE_TTL = Duration.ofSeconds(60);
 
     private final GitHubOAuthProvider githubProvider;
     private final GiteeOAuthProvider giteeProvider;
@@ -140,15 +149,47 @@ public class OAuthController {
             userMapper.insert(user);
         }
 
-        String token = jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole());
-        // 参数 URL 编码，防止中文昵称/特殊字符导致 Location header 非法
-        String callbackUrl = webUrl + "/oauth/callback?token=" + token
-                + "&userId=" + user.getId()
-                + "&username=" + URLEncoder.encode(user.getUsername(), StandardCharsets.UTF_8)
-                + "&nickname=" + URLEncoder.encode(user.getNickname() != null ? user.getNickname() : "", StandardCharsets.UTF_8)
-                + "&avatar=" + URLEncoder.encode(user.getAvatar() != null ? user.getAvatar() : "", StandardCharsets.UTF_8)
-                + "&role=" + user.getRole();
-        response.sendRedirect(callbackUrl);
+        // ⚠️ 禁用检查必须放在签发 token 之前。
+        // 密码登录这条路会拦（AccountService.loginByPassword 判 status=0），
+        // 但第三方登录走的是另一条代码路径 —— 账号被禁用后，对方刷新一下
+        // 仍能从 GitHub/Gitee/华为登进来，等于「禁用」只对一种登录方式有效。
+        if (user.getStatus() != null && user.getStatus() == 0) {
+            redirectError(response, "账号已被禁用，请联系站长");
+            return;
+        }
+
+        LoginVO vo = LoginVO.of(user, jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole()));
+
+        // 一次性授权码：回调地址里只放这个，不再放完整 JWT。
+        // 原因是浏览器跳转的 URL 会进 nginx access log（格式里带了 "$request"）、
+        // 浏览器历史、以及 Referer —— 一个 24 小时有效的管理员 token 躺在这些地方，
+        // 等于把钥匙贴在门口。code 只有 60 秒寿命、换一次即删，翻到也来不及用。
+        String oneTimeCode = IdUtil.simpleUUID();
+        stringRedisTemplate.opsForValue()
+                .set(EXCHANGE_KEY_PREFIX + oneTimeCode, JSON.toJSONString(vo), EXCHANGE_TTL);
+        response.sendRedirect(webUrl + "/oauth/callback?code=" + oneTimeCode);
+    }
+
+    /**
+     * 用回调页拿到的一次性 code 换登录凭证。
+     *
+     * <p>必须 POST：GET 会把 code 又写进一条日志，而且是可被图片/预取触发的动作。
+     *
+     * <p>getAndDelete 保证「同一个 code 只能用一次」—— 即使日志里翻出来，
+     * 在正常用户换完之后它也已经不存在了。
+     */
+    @PostMapping("/exchange")
+    public Result<LoginVO> exchange(@RequestBody(required = false) Map<String, String> body) {
+        String code = body == null ? null : body.get("code");
+        if (StrUtil.isBlank(code)) {
+            throw new BusinessException(400, "缺少登录凭证，请重新发起登录");
+        }
+        String payload = stringRedisTemplate.opsForValue().getAndDelete(EXCHANGE_KEY_PREFIX + code);
+        if (payload == null) {
+            // 三种情况都走这里：过期（>60s）、已经换过一次、伪造。对用户来说都是同一句
+            throw new BusinessException(400, "登录凭证已失效，请重新发起登录");
+        }
+        return Result.ok(JSON.parseObject(payload, LoginVO.class));
     }
 
     /**

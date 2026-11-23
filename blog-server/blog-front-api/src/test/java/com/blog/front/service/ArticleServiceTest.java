@@ -45,7 +45,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -58,6 +60,8 @@ class ArticleServiceTest {
     private final ArticleRevisionMapper articleRevisionMapper = mock(ArticleRevisionMapper.class);
     @SuppressWarnings("unchecked")
     private final RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+    /** 知识库向量清理：只关心「什么时候该调用它」，不关心它内部怎么发 HTTP */
+    private final RagIndexClient ragIndexClient = mock(RagIndexClient.class);
 
     /**
      * LambdaQueryWrapper.select(方法引用...) 会立即解析列名，依赖 MyBatis-Plus 的
@@ -75,7 +79,7 @@ class ArticleServiceTest {
 
     private ArticleService service() {
         return new ArticleService(articleMapper, categoryMapper, tagMapper,
-                articleTagMapper, articleRevisionMapper, redisTemplate);
+                articleTagMapper, articleRevisionMapper, redisTemplate, ragIndexClient);
     }
 
     @SuppressWarnings("unchecked")
@@ -874,5 +878,175 @@ class ArticleServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service().reject(5L, "   "));
         assertEquals(400, ex.getCode(), "驳回必须写理由，否则作者只会反复重交同一篇");
+    }
+
+    // ---------------- 撤下 / 取消定时：publishAt 必须真的写进库 ----------------
+
+    /**
+     * 撤下文章时实体里的 publishAt 会被置 null，但 MyBatis-Plus 默认更新策略是
+     * NOT_NULL —— 为 null 的字段根本不进 SET 子句。所以「发布 → 撤下」如果只靠
+     * updateById，库里 publish_at 还留着旧时间，而 ScheduledPublishJob 的扫描条件
+     * 正是「status=0 且 publish_at <= now()」，下一分钟就会把它重新公开。
+     * 必须另有一条显式 SQL 置空（这正是本测试要锁住的东西）。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void update_publishToDraft_clearsPublishAtExplicitly() {
+        Article existing = new Article();
+        existing.setId(7L);
+        existing.setStatus(ArticleService.STATUS_PUBLISHED);
+        existing.setTitle("已发布");
+        existing.setSlug("live-post");
+        existing.setContentMd("正文");
+        existing.setPublishAt(LocalDateTime.now().minusDays(1));
+        when(articleMapper.selectById(7L)).thenReturn(existing);
+
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("已发布");
+        dto.setSlug("live-post");
+        dto.setStatus(ArticleService.STATUS_DRAFT);
+        dto.setContentMd("正文");
+        dto.setPublishAt(LocalDateTime.now().minusDays(1));
+
+        service().update(7L, dto, 9L, false);
+
+        assertNull(capturedUpdate().getPublishAt(), "撤下后实体里的 publishAt 必须为空");
+        verify(articleMapper).update(isNull(), any(Wrapper.class));
+    }
+
+    // ---------------- 审核状态不能被通用编辑器破坏 ----------------
+
+    @Test
+    void update_pendingArticle_keepsPendingStatus() {
+        Article existing = new Article();
+        existing.setId(8L);
+        existing.setStatus(ArticleService.STATUS_PENDING);
+        existing.setTitle("投稿");
+        existing.setSlug("submission");
+        existing.setContentMd("正文");
+        when(articleMapper.selectById(8L)).thenReturn(existing);
+
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("投稿");
+        dto.setSlug("submission");
+        dto.setStatus(ArticleService.STATUS_PENDING);   // 编辑器把原状态带回来（自动保存也走这条）
+        dto.setContentMd("正文");
+
+        loginAs("ROLE_admin");
+        service().update(8L, dto, 9L, true);
+
+        Article updated = capturedUpdate();
+        assertEquals(ArticleService.STATUS_PENDING, updated.getStatus(),
+                "编辑待审稿不能把它打成草稿 —— 否则稿子从审核队列里凭空消失");
+        assertNull(updated.getPublishAt(), "审核态的稿件不允许带定时时间，否则到点就自动上线");
+    }
+
+    @Test
+    void update_pendingToPublished_byPlainAdmin_isRejected() {
+        Article existing = new Article();
+        existing.setId(10L);
+        existing.setStatus(ArticleService.STATUS_PENDING);
+        existing.setTitle("投稿");
+        existing.setSlug("submission");
+        existing.setContentMd("正文");
+        when(articleMapper.selectById(10L)).thenReturn(existing);
+
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("投稿");
+        dto.setSlug("submission");
+        dto.setStatus(ArticleService.STATUS_PUBLISHED);  // 在通用编辑器点「发布」
+        dto.setContentMd("正文");
+
+        loginAs("ROLE_admin");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service().update(10L, dto, 9L, false));
+        assertEquals(403, ex.getCode(),
+                "待审稿的上线只能走 approve（hasRole('super')），普通管理员用 PUT 不能绕过");
+        verify(articleMapper, never()).updateById(any(Article.class));
+    }
+
+    @Test
+    void update_pendingToPublished_bySuper_isAllowed() {
+        Article existing = new Article();
+        existing.setId(12L);
+        existing.setStatus(ArticleService.STATUS_PENDING);
+        existing.setTitle("投稿");
+        existing.setSlug("submission");
+        existing.setContentMd("正文");
+        when(articleMapper.selectById(12L)).thenReturn(existing);
+
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("投稿");
+        dto.setSlug("submission");
+        dto.setStatus(ArticleService.STATUS_PUBLISHED);
+        dto.setContentMd("正文");
+
+        loginAs("ROLE_super");
+        service().update(12L, dto, 9L, false);
+
+        assertEquals(ArticleService.STATUS_PUBLISHED, capturedUpdate().getStatus(),
+                "超管在通用编辑器点发布应当生效（等价于 approve）");
+    }
+
+    // ---------------- 下架时清理知识库向量 ----------------
+
+    @Test
+    void update_publishedToDraft_evictsKnowledgeBaseVector() {
+        Article existing = new Article();
+        existing.setId(15L);
+        existing.setStatus(ArticleService.STATUS_PUBLISHED);
+        existing.setTitle("已发布");
+        existing.setSlug("live-post-2");
+        existing.setContentMd("正文");
+        existing.setPublishAt(LocalDateTime.now().minusDays(1));
+        when(articleMapper.selectById(15L)).thenReturn(existing);
+
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("已发布");
+        dto.setSlug("live-post-2");
+        dto.setStatus(ArticleService.STATUS_DRAFT);   // 撤下
+        dto.setContentMd("正文");
+
+        service().update(15L, dto, 9L, false);
+
+        verify(ragIndexClient).evictArticle(15L);
+    }
+
+    @Test
+    void update_draftAutosave_doesNotTouchKnowledgeBase() {
+        // 草稿本来就不该在知识库里，每 5 秒一次的自动保存更不该去打 RAG
+        Article existing = new Article();
+        existing.setId(16L);
+        existing.setStatus(ArticleService.STATUS_DRAFT);
+        existing.setTitle("草稿");
+        existing.setSlug("draft-post");
+        existing.setContentMd("正文");
+        when(articleMapper.selectById(16L)).thenReturn(existing);
+
+        ArticleDTO dto = new ArticleDTO();
+        dto.setTitle("草稿");
+        dto.setSlug("draft-post");
+        dto.setStatus(ArticleService.STATUS_DRAFT);
+        dto.setContentMd("正文");
+
+        service().update(16L, dto, 9L, true);
+
+        verify(ragIndexClient, never()).evictArticle(any());
+    }
+
+    // ---------------- 回收站并发 ----------------
+
+    @Test
+    void forceDelete_alreadyRestored_throwsConflict() {
+        // 物理删除只删「还在回收站」的行：受影响 0 行说明它已被恢复（或已被别人删掉）
+        when(articleMapper.forceDeleteById(11L)).thenReturn(0);
+        Article restored = new Article();
+        restored.setId(11L);
+        restored.setIsDeleted(0);
+        when(articleMapper.selectById(11L)).thenReturn(restored);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service().forceDelete(11L));
+        assertEquals(409, ex.getCode(), "已经不存在的删除应当报冲突，而不是假装成功");
+        verify(articleTagMapper, never()).delete(any());
     }
 }

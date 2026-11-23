@@ -260,6 +260,7 @@ async function submitPwd() {
     return
   }
   pwdBusy.value = true
+  const wasSet = !!current.value.passwordSet
   try {
     const res: any = await put('/auth/password', {
       // 没设过密码的账号没有"原密码"这个概念，不传即可
@@ -271,6 +272,15 @@ async function submitPwd() {
       return
     }
     pwdVisible.value = false
+    if (wasSet) {
+      // 改密码会让该用户已签发的所有凭证失效（含手上这一个），因为改密码的动机
+      // 往往就是「怀疑被登了」，留着旧会话等于白改。所以这里主动退出，
+      // 而不是让用户下一次点任何按钮时撞一个莫名其妙的 401。
+      toast('密码已更新，请用新密码重新登录', 'success')
+      authStore.logout()
+      await navigateTo('/login')
+      return
+    }
     toast('密码已保存，下次可以用用户名 + 密码登录', 'success')
     await refreshMe()
     syncStoreFromMe()

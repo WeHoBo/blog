@@ -12,6 +12,7 @@ import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.CommentMapper;
 import com.blog.common.mapper.UserMapper;
+import com.blog.common.security.TokenRevocationService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,7 +58,8 @@ class AdminUserControllerTest {
     private final CommentMapper commentMapper = mock(CommentMapper.class);
 
     private final AdminUserController controller =
-            new AdminUserController(userMapper, articleMapper, commentMapper, mock(PasswordEncoder.class));
+            new AdminUserController(userMapper, articleMapper, commentMapper,
+                    mock(PasswordEncoder.class), mock(TokenRevocationService.class));
 
     @AfterEach
     void clearContext() {

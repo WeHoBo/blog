@@ -33,34 +33,57 @@
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const { post } = useApi()
 
 const errorMessage = ref('')
 
-if (process.client) {
-  const token = route.query.token as string
-  // 后端失败时会重定向到这里并带上 error（URL 编码过的原因）
+/**
+ * 回调页只负责一件事：拿地址里的**一次性 code** 去换登录凭证。
+ *
+ * ⚠️ 凭证不能放在回调 URL 里：那条 URL 会被 nginx access log、浏览器历史、
+ * Referer 各记一份，而它背后是一个 24 小时有效的管理员 token。
+ * 现在地址里只有一个 60 秒、用一次即删的 code。
+ */
+onMounted(async () => {
   const error = route.query.error as string
+  const code = route.query.code as string
+  // 过渡期兼容：jar 与前端是两个产物，若只换了其中一个，旧回调仍会带 token 过来
+  const legacyToken = route.query.token as string
 
   if (error) {
     errorMessage.value = error
-  } else if (token) {
-    const userId = route.query.userId as string
-    const username = route.query.username as string
-    const nickname = route.query.nickname as string
-    const avatar = route.query.avatar as string
-    const role = route.query.role as string
-
-    authStore.setAuth(token, {
-      userId: Number(userId),
-      username,
-      nickname: nickname || username,
-      avatar: avatar || '',
-      role: role || 'user'
-    })
-    router.push('/')
-  } else {
-    // 既没有 token 也没有 error：回调参数异常，给出提示而不是无限转圈
-    errorMessage.value = '登录回调缺少必要参数，请重新发起登录'
+    return
   }
-}
+
+  if (code) {
+    try {
+      const res: any = await post('/auth/oauth/exchange', { code })
+      if (res?.code === 200 && res.data?.token) {
+        authStore.setAuthFromLogin(res.data)
+        // replace 而不是 push：别让带 code 的 URL 留在浏览器历史里
+        await router.replace('/')
+      } else {
+        errorMessage.value = res?.message || '登录凭证已失效，请重新发起登录'
+      }
+    } catch (e: any) {
+      errorMessage.value = e?.message || '登录凭证换取失败，请重新发起登录'
+    }
+    return
+  }
+
+  if (legacyToken) {
+    authStore.setAuth(legacyToken, {
+      userId: Number(route.query.userId),
+      username: route.query.username as string,
+      nickname: (route.query.nickname as string) || (route.query.username as string),
+      avatar: (route.query.avatar as string) || '',
+      role: (route.query.role as string) || 'user'
+    })
+    await router.replace('/')
+    return
+  }
+
+  // 既没有 code 也没有 error：回调参数异常，给出提示而不是无限转圈
+  errorMessage.value = '登录回调缺少必要参数，请重新发起登录'
+})
 </script>

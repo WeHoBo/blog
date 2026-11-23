@@ -239,7 +239,20 @@ let cmView: EditorView | null = null
 let syncing = false
 let dragging = false
 let autosaveTimer: any = null
-let dirty = false
+/**
+ * 「有未保存的修改」。必须是 ref —— 它同时驱动顶部的「未保存」徽标，
+ * 用普通变量时 computed 读不到变化，那个提示永远不会出现。
+ */
+const dirty = ref(false)
+/**
+ * 编辑版本号：每次表单变更 +1。
+ *
+ * ⚠️ 为什么需要它：保存是异步的，请求飞出去之后用户还能继续打字。
+ * 旧请求回来时若无条件 `dirty = false`，等待期间敲的那几个字就被当成"已保存"，
+ * 5 秒后的自动保存看到 dirty=false 直接跳过 —— 最后一次输入悄悄丢了。
+ * 现在保存只认「我发出去那一刻的版本」，期间有新输入就保持 dirty 并再排一次。
+ */
+let editVersion = 0
 /** 自动保存失败只提示一次，避免每 5 秒弹一个 toast */
 let autosaveFailed = false
 
@@ -278,7 +291,7 @@ const form = reactive({
 const saveState = computed(() => {
   if (saving.value) return { text: '保存中…', cls: 'text-gray-400' }
   if (slugState.value === 'taken') return { text: 'URL 已被占用', cls: 'text-red-500' }
-  if (dirty) return { text: '未保存', cls: 'text-amber-500' }
+  if (dirty.value) return { text: '未保存', cls: 'text-amber-500' }
   if (autosaveTimer) return { text: '已自动保存', cls: 'text-green-500' }
   return { text: '', cls: '' }
 })
@@ -732,6 +745,7 @@ async function saveAuthor(submit: boolean) {
   }
   if (submit) autoSummary()
   saving.value = true
+  const versionAtSave = editVersion
   try {
     const qs = `?submit=${submit}`
     // ⚠️ 这里原来只有「新建」判了 code，「更新」把返回值直接吞了 ——
@@ -749,7 +763,9 @@ async function saveAuthor(submit: boolean) {
       ;(props as any).articleId = res.data.id
       await router.replace(`/author/${res.data.id}`)
     }
-    dirty = false
+    // 作者模式没有自动保存，所以这里不重排定时器；但同样不能把等待期间的
+    // 新输入标成「已保存」—— 否则作者以为发出去的是最后那一版，实际少了几句
+    if (editVersion === versionAtSave) dirty.value = false
     toast(submit ? '已提交审核，站长通过后就会上线' : '草稿已保存', 'success')
     if (submit) {
       // 停留一下让提示看得见，再回列表
@@ -833,6 +849,9 @@ async function save(status: number, autosave = false) {
     autoSummary()
   }
   saving.value = true
+  // 记住「这次请求代表的是哪一版内容」—— await 期间用户还能继续打字，
+  // 成功回调要凭它判断这几秒里有没有新输入（见下面的 dirty 处理）
+  const versionAtSave = editVersion
   try {
     // ⚠️ 必须判 res.code：后端业务失败返回的是 HTTP 200 + code=400（slug 冲突、
     // 标题为空、无权限…），useApi 不抛错。这里以前 PUT 的返回值根本没接，
@@ -860,7 +879,13 @@ async function save(status: number, autosave = false) {
     // 同步当前状态：否则「草稿 → 点发布 → 继续改一个字」时，
     // 5 秒后的自动保存还会带着旧状态 0，把刚发布的文章又打回草稿
     form.status = status
-    dirty = false
+    if (editVersion === versionAtSave) {
+      dirty.value = false
+    } else {
+      // 等待期间又有输入：这些字还没落库，不能标成已保存。
+      // 保持 dirty 并重新排一次自动保存，否则要等用户下次动手才会存下去
+      scheduleAutosave()
+    }
     if (!autosave) {
       // 发布/更新后立刻清页面缓存：首页缓 20s、详情页缓 10s，
       // 不清的话「发完文章回首页看不到」会持续十几秒。
@@ -879,9 +904,36 @@ async function save(status: number, autosave = false) {
 }
 
 function markDirty() {
-  dirty = true
+  editVersion++
+  dirty.value = true
   scheduleAutosave()
 }
+
+/**
+ * 表单快照：用来区分「用户改动」和「程序赋值」。
+ *
+ * 以前只有正文（CodeMirror 的 updateListener）会调 markDirty，于是改标题、摘要、
+ * 分类、标签、封面、发布时间全都不算改动 —— 不触发自动保存、顶部不显示「未保存」、
+ * 关页面也不弹拦截。用户改完标题直接切走，那行字就没了。
+ * 现在整份表单共用这一套追踪。
+ *
+ * 用快照比对而不是一个「已加载」布尔：加载文章时那一串 form.xxx = ... 也会触发
+ * watch，靠快照相等才不会被误判成用户改动（布尔标志会被 nextTick 的时序坑到）。
+ */
+let lastFormJson = ''
+/**
+ * 表单指纹。跳过正文：正文有 CodeMirror 的 updateListener 单独负责 markDirty，
+ * 而且一篇几万字的稿子每敲一个键就全量序列化一遍不值得。
+ */
+function formFingerprint(): string {
+  return JSON.stringify(form, (k, v) => (k === 'contentMd' ? undefined : v))
+}
+watch(form, () => {
+  const now = formFingerprint()
+  if (now === lastFormJson) return
+  lastFormJson = now
+  markDirty()
+}, { deep: true })
 
 function scheduleAutosave() {
   if (!props.articleId) return // 新建尚未拿到 id，不自动保存
@@ -891,7 +943,7 @@ function scheduleAutosave() {
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = setTimeout(async () => {
     autosaveTimer = null
-    if (!dirty) return
+    if (!dirty.value) return
     try {
       // 保持原状态自动保存：已发布的仍是已发布，草稿仍是草稿
       await save(form.status, true)
@@ -933,7 +985,7 @@ function goRevisions() {
 // ============ 未保存拦截 ============
 
 function onBeforeUnload(e: BeforeUnloadEvent) {
-  if (dirty) {
+  if (dirty.value) {
     e.preventDefault()
     e.returnValue = ''
   }
@@ -979,7 +1031,11 @@ onMounted(async () => {
   loading.value = true
   await Promise.all([fetchArticle(), fetchCategories(), fetchTags()])
   loading.value = false
-  nextTick(() => initEditor())
+  nextTick(() => {
+    initEditor()
+    // 初始化完成后打一个快照：此刻之前的所有赋值都是"加载"，不是"用户改动"
+    lastFormJson = formFingerprint()
+  })
   window.addEventListener('beforeunload', onBeforeUnload)
   document.addEventListener('fullscreenchange', onFullscreenChange)
 })

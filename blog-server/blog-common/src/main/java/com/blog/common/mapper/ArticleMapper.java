@@ -91,8 +91,15 @@ public interface ArticleMapper extends BaseMapper<Article> {
     @Update("UPDATE article SET is_deleted = 0 WHERE id = #{id} AND is_deleted = 1")
     int restoreById(@Param("id") Long id);
 
-    /** 彻底删除（物理删除，绕过逻辑删除） */
-    @Delete("DELETE FROM article WHERE id = #{id}")
+    /**
+     * 彻底删除（物理删除，绕过逻辑删除）。
+     *
+     * <p>⚠️ {@code AND is_deleted = 1} 不能省：恢复操作是按 id + 回收站状态做的，
+     * 物理删除却一度只按 id 匹配。两位管理员同时处理时，一人刚点了「恢复」，
+     * 另一人用旧列表点「彻底删除」，恢复回来的正文照样被物理删掉、且返回成功。
+     * 带上这个条件后，那种情况会 0 行受影响，服务层据此返回冲突而不是假装成功。
+     */
+    @Delete("DELETE FROM article WHERE id = #{id} AND is_deleted = 1")
     int forceDeleteById(@Param("id") Long id);
 
     /**

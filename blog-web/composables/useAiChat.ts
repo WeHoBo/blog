@@ -331,6 +331,29 @@ export const useAiChat = () => {
     }
   }
 
+  /**
+   * 换账号 / 退出：把上一个人的会话清干净。
+   *
+   * <p>为什么需要：messages / input / quota 全都用 {@code useState} 存在**应用级**，
+   * 不随组件卸载消失。共用设备时「A 退出 → B 登录」之后，A 问过什么、AI 答了什么、
+   * 引用过哪几篇文章，全都还在面板里摆着 —— B 一打开就看见了别人的对话。
+   *
+   * <p>为什么监听 userId 而不是在 {@code auth.logout()} 里清：auth store 不能反向依赖
+   * 本文件（本文件已经依赖了 store），那样就形成循环引用了。
+   *
+   * <p>先 {@code stop()} 再清空是对的：中止后那条请求的 catch 在微任务里才执行，
+   * 那时 messages 已经空了，{@code lastAssistant()} 返回 null，不会又往新会话里补一条。
+   */
+  watch(() => authStore.user?.userId ?? null, (now, before) => {
+    if (now === before) return
+    stop()
+    messages.value = []
+    input.value = ''
+    pendingSources.value = []
+    quota.value = null
+    open.value = false
+  })
+
   return {
     open, toggle, openPanel, close,
     messages, input, streaming, pendingSources, mode, quota,

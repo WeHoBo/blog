@@ -114,6 +114,18 @@ class ArticleIn(BaseModel):
     category: str = ""
 
 
+class ArticleIdsIn(BaseModel):
+    """要清掉向量的文章 id"""
+
+    ids: list[int | str] = Field(default_factory=list)
+
+
+class PruneIndexIn(BaseModel):
+    """全量对账：除了这些 id，库里其余文章向量一律删除"""
+
+    keep_ids: list[int | str] = Field(default_factory=list)
+
+
 class FreeChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=20000, description="用户问题/代码/文章内容")
     mode: str = Field("explain", description="explain=代码解释/总结；chat=自由对话")
@@ -321,6 +333,67 @@ async def ingest_articles(articles: list[ArticleIn]):
             failed.append({"id": article_id, "title": art.title, "error": str(e)})
     print(f"[入库] 文章 {len(articles)} 篇，成功块 {total_chunks}，失败 {len(failed)} 篇: {failed}")
     return {"message": "入库完成", "articles": len(articles), "chunks": total_chunks, "failed": failed}
+
+
+# ---------------- 接口四：删除文章向量 / 全量对账 ----------------
+@app.post("/delete-articles")
+async def delete_articles(body: ArticleIdsIn):
+    """
+    按 id 删除文章向量。
+
+    调用方是 Java 侧：文章下架、进回收站、被物理删除时顺手通知一声。
+    没删干净也不致命 —— import_blog.py 的全量对账（/prune-index）会兜底。
+    """
+    if not body.ids:
+        return {"message": "没有需要删除的文章", "removed": 0}
+    removed = []
+    for aid in body.ids:
+        try:
+            await asyncio.to_thread(vector_store.delete_article, str(aid))
+            removed.append(str(aid))
+        except Exception as e:
+            print(f"[删除] 文章 {aid} 向量删除失败: {e}")
+    return {"message": "已删除", "removed": len(removed), "ids": removed}
+
+
+@app.post("/prune-index")
+async def prune_index(body: PruneIndexIn):
+    """
+    全量对账：库里存在、但不在 keep_ids 里的文章向量全部删掉。
+
+    <p>为什么必须有这一步：/ingest-articles 是「传进来的文章各自覆盖自己」，
+    一篇文章从公开变成草稿后就不再出现在导入名单里 —— 于是它的旧向量**永远不会被替换，
+    也永远不会被删除**。检索仍然能把它下架前的正文片段送给模型，读者在文章页看不到的内容，
+    问 AI 却能拿到。
+
+    <p>keep_ids 必须来自「当前所有公开文章」的全集（import_blog.py 就是这么取的）。
+    ⚠️ 空列表直接拒绝：调用方传错一个空数组就把整个知识库清空，这个代价太大。
+    """
+    if not body.keep_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="keep_ids 不能为空：空集合会把整个知识库清空。确实要清空请逐篇调用 /delete-articles",
+        )
+
+    keep = {str(i) for i in body.keep_ids}
+    existing = await asyncio.to_thread(vector_store.list_article_ids)
+    stale = sorted(existing - keep)
+
+    removed = []
+    for aid in stale:
+        try:
+            await asyncio.to_thread(vector_store.delete_article, aid)
+            removed.append(aid)
+        except Exception as e:
+            print(f"[对账] 文章 {aid} 向量删除失败: {e}")
+
+    print(f"[对账] 库中 {len(existing)} 篇，应保留 {len(existing & keep)} 篇，清理残留 {len(removed)} 篇: {removed}")
+    return {
+        "message": "对账完成",
+        "existing": len(existing),
+        "kept": len(existing & keep),
+        "removed": removed,
+    }
 
 
 # ---------------- SSE 工具 ----------------

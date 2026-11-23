@@ -11,6 +11,7 @@ import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.ArticleMapper;
 import com.blog.common.mapper.CommentMapper;
 import com.blog.common.mapper.UserMapper;
+import com.blog.common.security.TokenRevocationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -44,6 +45,7 @@ public class AdminUserController {
     private final ArticleMapper articleMapper;
     private final CommentMapper commentMapper;
     private final PasswordEncoder passwordEncoder;
+    private final TokenRevocationService revocationService;
 
     @GetMapping("/list")
     public Result<Page<User>> list(
@@ -68,6 +70,9 @@ public class AdminUserController {
         Long me = currentUserId();
         boolean isSelf = me != null && me.equals(id);
         boolean targetIsSuper = "super".equals(user.getRole());
+        // 这次请求是否动了「身份」：角色、状态、密码任意一项变了，该用户已签发的 token
+        // 就必须作废 —— 否则「禁用」「降权」「改密码」对已登录的设备全都不生效
+        boolean identityChanged = false;
 
         // 只有"真的要改"才校验：前端每次都把整个表单发上来，值没变就不该拦
         if (form.getRole() != null && !form.getRole().trim().equals(user.getRole())) {
@@ -80,19 +85,25 @@ public class AdminUserController {
             if (isSelf) throw new BusinessException(400, "不能修改自己的角色（会把自己锁在门外）");
             if (targetIsSuper) throw new BusinessException(400, "不能修改超级管理员的角色");
             user.setRole(role);
+            identityChanged = true;
         }
 
         if (form.getStatus() != null && !form.getStatus().equals(user.getStatus())) {
             if (isSelf) throw new BusinessException(400, "不能禁用自己的账号");
             if (targetIsSuper) throw new BusinessException(400, "不能禁用超级管理员");
             user.setStatus(form.getStatus());
+            identityChanged = true;
         }
 
         if (form.getNickname() != null) user.setNickname(form.getNickname());
         if (form.getPassword() != null && !form.getPassword().isBlank()) {
             user.setPassword(passwordEncoder.encode(form.getPassword()));
+            identityChanged = true;
         }
         userMapper.updateById(user);
+        if (identityChanged) {
+            revocationService.revokeAll(id);
+        }
         return Result.ok();
     }
 
@@ -148,6 +159,8 @@ public class AdminUserController {
                         + " 条评论，请先在「评论」里清理后再删账号；只想让人进不来的话，用「禁用」即可");
             }
             userMapper.deleteById(id);
+            // 人删了，他手里的 token 还在 —— 不撤销的话，被删账号最多还能用满 24 小时
+            revocationService.revokeAll(id);
             return Result.ok();
         }
 
@@ -162,6 +175,7 @@ public class AdminUserController {
                     .set(Article::getUserId, me));
         }
         userMapper.deleteById(id);
+        revocationService.revokeAll(id);
 
         Map<String, Long> moved = new LinkedHashMap<>();
         moved.put("articles", articles);

@@ -31,6 +31,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -76,6 +78,8 @@ public class ArticleService {
     private final ArticleTagMapper articleTagMapper;
     private final ArticleRevisionMapper articleRevisionMapper;
     private final RedisTemplate<String, Object> redisTemplate;
+    /** 文章从公开变为非公开时，顺手把知识库里的向量也撤掉 */
+    private final RagIndexClient ragIndexClient;
 
     // =================================================================
     // 列表 / 详情
@@ -458,7 +462,7 @@ public class ArticleService {
         article.setIsFeatured(featured != null ? featured : 0);
         article.setWordCount(WordCounter.count(dto.getContentMd()));
         article.setUserId(userId);
-        applyPublishSchedule(article, dto);
+        applyPublishSchedule(article, dto, null);
         requireContentWhenPublished(article);
 
         try {
@@ -486,6 +490,8 @@ public class ArticleService {
         if (article == null) {
             throw new BusinessException("文章不存在");
         }
+        // 原状态要在 applyPublishSchedule 覆盖之前抓住 —— 它决定「这次改动是不是审核流程的一部分」
+        Integer originalStatus = article.getStatus();
         String oldTitle = article.getTitle();
         Long oldCategoryId = article.getCategoryId();
 
@@ -529,13 +535,31 @@ public class ArticleService {
         ensureSlugAvailable(slug, id);
         article.setSlug(slug);
 
-        applyPublishSchedule(article, dto);
+        applyPublishSchedule(article, dto, originalStatus);
+        // 从公开变成不公开（撤下 / 转草稿 / 送审）时，知识库里的向量也要撤掉。
+        // ⚠️ 只在「状态真的变了」时才调：草稿的自动保存每 5 秒一次，
+        // 无条件调等于给 RAG 挂了一个 5 秒一次的定时请求。
+        if (originalStatus != null && originalStatus == STATUS_PUBLISHED
+                && (article.getStatus() == null || article.getStatus() != STATUS_PUBLISHED)) {
+            afterCommit(() -> ragIndexClient.evictArticle(id));
+        }
         requireContentWhenPublished(article);
 
         try {
             articleMapper.updateById(article);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(400, "别名已被占用，请换一个自定义 URL 后重试");
+        }
+        // ⚠️ publishAt 需要被清空时（撤下、取消定时、转纯草稿），上面那条 updateById
+        // 根本不会写它：MyBatis-Plus 默认更新策略是 NOT_NULL，实体里为 null 的字段
+        // 直接不进 SET 子句。结果是数据库里 publish_at 还留着原值，而
+        // ScheduledPublishJob 的条件正是「status=0 且 publish_at <= now()」——
+        // 一篇刚撤下的文章会在下一分钟被它重新公开（2026-11-23 修）。
+        // 只能用显式 SQL 置空（setSql 而不是 set(..., null)，后者依赖包装行为，容易看走眼）。
+        if (article.getPublishAt() == null) {
+            articleMapper.update(null, new LambdaUpdateWrapper<Article>()
+                    .eq(Article::getId, id)
+                    .setSql("publish_at = NULL"));
         }
 
         syncTags(id, dto.getTagIds());
@@ -878,6 +902,13 @@ public class ArticleService {
     public void forceDelete(Long id) {
         int affected = articleMapper.forceDeleteById(id);
         if (affected == 0) {
+            // 区分两种 0 行：文章压根不存在 vs 它已经不在回收站了。
+            // 后者是并发场景 —— 有人刚把它恢复，或者别人已经删过一遍。
+            // 以前这里只有 WHERE id，所以「已恢复」的正文会被旧列表的删除操作带走，
+            // 而且用户看到的是「彻底删除成功」。
+            if (articleMapper.selectById(id) != null) {
+                throw new BusinessException(409, "这篇文章已经不在回收站了（可能刚被恢复），请刷新列表再看");
+            }
             throw new BusinessException(404, "文章不存在");
         }
         articleTagMapper.delete(new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getArticleId, id));
@@ -1490,15 +1521,47 @@ public class ArticleService {
      * 用户明明选了时间却不生效。现在它的语义是「这篇文章的发布时间」，
      * 草稿阶段的未来时刻兼职「定时发布时刻」。
      */
-    private void applyPublishSchedule(Article article, ArticleDTO dto) {
-        Integer status = dto.getStatus() == null ? 0 : dto.getStatus();
+    private void applyPublishSchedule(Article article, ArticleDTO dto, Integer originalStatus) {
+        // 不传状态时的默认值要分新建和编辑：
+        //   新建 → 草稿（0）
+        //   编辑 → 保持原状态。若这里也默认 0，任何不传 status 的调用方
+        //          （脚本、第三方、将来的新前端）编辑一篇已发布文章都会把它悄悄下架
+        Integer status = dto.getStatus() != null
+                ? dto.getStatus()
+                : (originalStatus != null ? originalStatus : STATUS_DRAFT);
         LocalDateTime publishAt = dto.getPublishAt();
-        if (status == 1) {
-            article.setStatus(1);
+
+        // 「还在审核流程里」= 库里的原状态是待审或已驳回
+        boolean inReview = originalStatus != null
+                && (originalStatus == STATUS_PENDING || originalStatus == STATUS_REJECTED);
+
+        if (status == STATUS_PUBLISHED) {
+            // ⚠️ 待审/驳回稿的「上线」只能走 approve 接口，而那个接口是 hasRole('super')。
+            // 但通用编辑器 PUT /article/{id} 只要 admin —— 普通管理员从后台列表点进
+            // 「编辑」，在同一个页面点「发布」就能让一篇没过审的投稿直接公开，
+            // 等于审核流程对他形同虚设。这里补上服务层这道闸（URL 层拦不住：
+            // 同一个接口管理员本来就要能用来编辑已发布文章）。
+            if (inReview && !isSuper()) {
+                throw new BusinessException(403,
+                        "这篇稿件还在审核流程里，只有超级管理员能发布。"
+                                + "请让超管在「投稿审核」里处理，或你先保存草稿。");
+            }
+            article.setStatus(STATUS_PUBLISHED);
             article.setPublishAt(publishAt != null ? publishAt : LocalDateTime.now());
             return;
         }
-        article.setStatus(0);
+
+        if (status == STATUS_PENDING || status == STATUS_REJECTED) {
+            // ⚠️ 这里以前是「只要不是 1 就置 0」，于是每次自动保存都把待审稿打成草稿：
+            // 管理员打开一篇投稿、什么都没改停 5 秒，稿子就从审核队列里消失了，
+            // 作者那边看到的是「又变回草稿」，超管那边永远等不到它。
+            // 现在原样保留审核态，并且不允许它带定时时间（审核态不能自动上线）。
+            article.setStatus(status);
+            article.setPublishAt(null);
+            return;
+        }
+
+        article.setStatus(STATUS_DRAFT);
         if (publishAt == null) {
             article.setPublishAt(null);
         } else if (publishAt.isAfter(LocalDateTime.now())) {
@@ -1510,9 +1573,28 @@ public class ArticleService {
         }
     }
 
+    /**
+     * 事务提交之后再执行。
+     *
+     * <p>用在这里是因为「删向量」是不可逆的外部副作用：若先删了向量、数据库那边
+     * 因为唯一键冲突之类回滚，文章还公开着、知识库里却没有它了 —— 读者问 AI 反而搜不到。
+     * 等提交成功再删，最坏情况是文章下线了但向量还在，那由全量对账兜底。
+     */
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
     /** 允许存空草稿，但不允许把空文章发出去 */
-    private void requireContentWhenPublished(Article article) {
-        if (article.getStatus() != null && article.getStatus() == 1
+    private void requireContentWhenPublished(Article article) {        if (article.getStatus() != null && article.getStatus() == 1
                 && StrUtil.isBlank(article.getContentMd())) {
             throw new BusinessException(400, "发布前请先填写正文；如果还没写完，可以先「保存草稿」");
         }

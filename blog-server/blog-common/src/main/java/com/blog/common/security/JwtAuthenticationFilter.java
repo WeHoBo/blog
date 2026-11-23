@@ -21,6 +21,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtUtils jwtUtils;
+    private final TokenRevocationService revocationService;
 
     /**
      * StreamingResponseBody 等异步请求在收尾阶段会触发 ASYNC dispatch，
@@ -38,16 +39,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = getTokenFromRequest(request);
         if (StrUtil.isNotBlank(token) && jwtUtils.validate(token)) {
             Long userId = jwtUtils.getUserId(token);
-            String role = (String) jwtUtils.parseToken(token).get("role");
-            List<GrantedAuthority> authorities = authoritiesOf(role);
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(userId, null, authorities);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            // 给访问日志用：访问日志过滤器在 Security 链的外层，等 chain.doFilter 返回时
-            // SecurityContext 已被清空，直接读 Authentication 一定是 null。
-            // 请求对象活到最后，所以把 userId 挂到 request attribute 上。
-            // （blog-common 不依赖 front-api，故此处用字面量，与 ApiAccessLogFilter.UID_ATTR 保持一致）
-            request.setAttribute("blog.uid", userId);
+            // 签发之后被撤销过的 token 一律当成没登录：不抛异常、不设 Authentication，
+            // 让它自然落到下面「需要登录的接口 → 401、公开接口 → 匿名」的常规路径。
+            // 这里救的是「禁用账号 / 降权 / 改密码」之后旧 token 还能用满 24 小时的问题。
+            if (!revocationService.isRevoked(userId, jwtUtils.getIssuedAtMillis(token))) {
+                String role = (String) jwtUtils.parseToken(token).get("role");
+                List<GrantedAuthority> authorities = authoritiesOf(role);
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(userId, null, authorities);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // 给访问日志用：访问日志过滤器在 Security 链的外层，等 chain.doFilter 返回时
+                // SecurityContext 已被清空，直接读 Authentication 一定是 null。
+                // 请求对象活到最后，所以把 userId 挂到 request attribute 上。
+                // （blog-common 不依赖 front-api，故此处用字面量，与 ApiAccessLogFilter.UID_ATTR 保持一致）
+                request.setAttribute("blog.uid", userId);
+            }
         }
         filterChain.doFilter(request, response);
     }

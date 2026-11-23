@@ -11,6 +11,7 @@ import com.blog.common.dto.SmsLoginDTO;
 import com.blog.common.entity.User;
 import com.blog.common.exception.BusinessException;
 import com.blog.common.mapper.UserMapper;
+import com.blog.common.security.TokenRevocationService;
 import com.blog.common.utils.JwtUtils;
 import com.blog.common.vo.LoginVO;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,7 @@ public class AccountService {
     private final JwtUtils jwtUtils;
     private final SmsCodeService smsCodeService;
     private final StringRedisTemplate redis;
+    private final TokenRevocationService revocationService;
 
     // ============================ 注册 ============================
 
@@ -181,6 +183,9 @@ public class AccountService {
         user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
         user.setPasswordSet(1);
         userMapper.updateById(user);
+        // 密码变了，之前签发的 token 一律作废 —— 改密码的常见动机就是「怀疑被人登了」，
+        // 不撤销的话那些会话还能继续用满 24 小时，等于改了也白改
+        revocationService.revokeAll(user.getId());
         log.info("密码已重置 uid={} phone={}", user.getId(), SmsService.mask(dto.getPhone()));
     }
 
@@ -209,6 +214,12 @@ public class AccountService {
         user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
         user.setPasswordSet(1);
         userMapper.updateById(user);
+        if (hasPassword) {
+            // 只有「改密码」才撤销：常见动机是怀疑密码泄露，旧会话必须立刻失效。
+            // 「首次设置密码」只是补上一种登录方式，不存在"旧会话可能被别人持有"的问题，
+            // 没必要把人踢出去。代价是**当前会话也会失效**，所以前端改成功后要主动退出。
+            revocationService.revokeAll(userId);
+        }
         log.info("密码已更新 uid={}", userId);
     }
 

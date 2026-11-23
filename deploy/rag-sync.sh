@@ -14,10 +14,11 @@
 #   3. 用 flock 防叠跑：上一轮没结束（大库可能跑几分钟）就跳过，不重复 embedding。
 #   4. 密码从独立的 .sync.env 读，不写在命令行参数里（会出现在 ps 和 shell history）。
 #
-# ⚠️ 已知局限（不是 bug，写在这里免得以后踩）：
-#   /ingest-articles 是「删掉这篇的旧块再重新写」，没有传进来的文章（已删除、转草稿、
-#   进回收站）的旧块会**留在库里**，形成指向不存在文章的"幽灵引用"。
-#   目前站内文章量少、没有大规模删过，暂时不影响；真要清理需要后端加一个 prune 接口。
+# ✅ 已解决（2026-11-23）：/ingest-articles 是「删掉这篇的旧块再重新写」，
+#   没传进来的文章（已删除、转草稿、进回收站）的旧块会留在库里形成"幽灵引用"。
+#   现在 import_blog.py 跑完会自动调 /prune-index 做全量对账，按「当前所有公开文章」
+#   的名单把多余的向量删掉 —— 本脚本不用改，跑一轮就顺手清干净了。
+#   只想清残留、不想重新 embedding：python import_blog.py --prune-only
 set -uo pipefail
 
 APP_DIR="${APP_DIR:-/opt/blog/rag/backend}"

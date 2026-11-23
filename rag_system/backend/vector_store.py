@@ -185,6 +185,28 @@ class VectorStore:
         """删除某篇博客文章对应的全部向量块"""
         self.collection.delete(where={"article_id": article_id})
 
+    def list_article_ids(self) -> set[str]:
+        """
+        库里出现过的所有文章 id（去重）。
+
+        用途只有一个：全量对账时算出「库里还有、但已经不该存在」的那些篇。
+        ⚠️ 不要把它的结果当成「文章列表」直接用 —— 它只反映**曾经入过库**的事实，
+        一篇文章被下架后，只要没人清理，它的 id 依然会在这里。
+        """
+        try:
+            result = self.collection.get(include=["metadatas"])
+        except Exception as e:
+            print(f"[向量库] 列出文章 id 失败: {e}")
+            return set()
+
+        ids: set[str] = set()
+        for meta in (result.get("metadatas") or []):
+            if not meta:
+                continue
+            if meta.get("source_type") == "article" and meta.get("article_id") is not None:
+                ids.add(str(meta["article_id"]))
+        return ids
+
     def search(
         self,
         query: str,

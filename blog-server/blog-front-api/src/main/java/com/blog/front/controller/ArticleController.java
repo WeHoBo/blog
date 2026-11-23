@@ -16,6 +16,7 @@ import com.blog.common.mapper.UserMapper;
 import com.blog.common.exception.BusinessException;
 import com.blog.front.cache.ArticleCacheKeys;
 import com.blog.front.service.ArticleService;
+import com.blog.front.service.RagIndexClient;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,8 @@ public class ArticleController {
     private final ArticleMapper articleMapper;
     private final UserMapper userMapper;
     private final RedisTemplate<String, Object> redisTemplate;
+    /** 文章下线时同步清掉知识库里的向量（失败只记日志，全量对账兜底） */
+    private final RagIndexClient ragIndexClient;
 
     /**
      * 读取聚合缓存。Redis 不可用时静默降级为「无缓存直查」，
@@ -340,6 +343,8 @@ public class ArticleController {
                                   @RequestParam(defaultValue = "false") boolean autosave) {
         Article updated = articleService.update(id, dto, currentUserId(), autosave);
         evictAggCache();
+        // 下线时清知识库向量这一步在 ArticleService.update 里做（它才拿得到原状态，
+        // 而且只在「公开 → 非公开」时触发，不会让草稿的自动保存每 5 秒打一次 RAG）
         return Result.ok(updated);
     }
 
@@ -348,6 +353,7 @@ public class ArticleController {
     public Result<?> delete(@PathVariable Long id) {
         articleService.delete(id);
         evictAggCache();
+        ragIndexClient.evictArticle(id);
         return Result.ok();
     }
 
@@ -460,6 +466,7 @@ public class ArticleController {
     public Result<?> forceDelete(@PathVariable Long id) {
         articleService.forceDelete(id);
         evictAggCache();
+        ragIndexClient.evictArticle(id);
         return Result.ok();
     }
 
@@ -470,6 +477,7 @@ public class ArticleController {
             articleService.forceDelete(id);
         }
         evictAggCache();
+        ragIndexClient.evictArticles(ids);
         return Result.ok();
     }
 

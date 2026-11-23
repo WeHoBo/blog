@@ -56,10 +56,31 @@ public class JwtUtils {
                 .subject(String.valueOf(userId))
                 .claim("username", username)
                 .claim("role", role)
+                // 毫秒级签发时刻，供撤销比对用。
+                // 标准 iat 是数字秒，同一秒内「撤销」和「重新登录」分不开 ——
+                // 撤销后立刻登回来的新 token 会被刚写的撤销戳误伤。
+                .claim("ts", now.getTime())
                 .issuedAt(now)
                 .expiration(exp)
                 .signWith(getKey())
                 .compact();
+    }
+
+    /**
+     * 毫秒级签发时刻，用于判断该 token 是否早于用户的撤销时刻。
+     *
+     * <p>老 token（本次改动之前签发的）没有 {@code ts}，退回 {@code iat} 的秒级时间。
+     * 精度掉到秒只影响过渡期，但必须在 24 小时内完成过渡 —— 超过一个签名有效期后
+     * 就不存在没有 {@code ts} 的 token 了。
+     */
+    public long getIssuedAtMillis(String token) {
+        Claims claims = parseToken(token);
+        Number ts = claims.get("ts", Number.class);
+        if (ts != null) {
+            return ts.longValue();
+        }
+        Date issuedAt = claims.getIssuedAt();
+        return issuedAt == null ? 0L : issuedAt.getTime();
     }
 
     public Claims parseToken(String token) {

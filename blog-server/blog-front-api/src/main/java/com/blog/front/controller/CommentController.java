@@ -49,6 +49,19 @@ public class CommentController {
     public Result<Page<CommentVO>> list(@RequestParam Long articleId,
                                          @RequestParam(defaultValue = "1") int pageNum,
                                          @RequestParam(defaultValue = "20") int pageSize) {
+        // ⚠️ 先看文章本身还在不在、还公不公开。
+        // 以前只判评论自己的 status，于是「文章下架 / 进回收站」之后，
+        // 那条文章页确实 404 了，但它的旧评论内容和评论者昵称仍能从接口原样取出来 ——
+        // 内容下线应该是整条链路一起下线，不能只摘掉入口。
+        Article article = articleMapper.selectById(articleId);
+        if (article == null
+                || (article.getIsDeleted() != null && article.getIsDeleted() == 1)
+                || article.getStatus() == null
+                || article.getStatus() != 1) {
+            // 返回空页而不是报错：评论区是文章页的附属块，报错会让整个页面看起来坏了
+            return Result.ok(new Page<>(pageNum, pageSize, 0));
+        }
+
         LambdaQueryWrapper<Comment> wrapper = new LambdaQueryWrapper<Comment>()
                 .eq(Comment::getArticleId, articleId)
                 .eq(Comment::getStatus, 1)
