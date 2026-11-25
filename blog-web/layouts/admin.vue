@@ -1,12 +1,15 @@
 ﻿<template>
-  <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col relative">
-    <div v-if="bgImage" class="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30 dark:opacity-20" :style="{ backgroundImage: `url(${bgImage})` }"></div>
-    <StarryBackground v-else />
+  <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col relative"
+    :class="{ 'edition-shell edition-admin': reference, 'edition-side-shell': rail }">
+    <WallpaperLayer v-if="reference && visible && mode !== 'banner'" />
+    <div v-if="!reference && bgImage" class="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30 dark:opacity-20" :style="{ backgroundImage: `url(${bgImage})` }"></div>
+    <StarryBackground v-else-if="!reference" />
     <!-- Reading progress bar -->
     <div class="fixed top-0 left-0 z-50 h-0.5 bg-gradient-to-r from-primary-500 to-primary-500 transition-all" :style="{ width: progress + '%' }"></div>
     <!-- 顶栏也 sticky：后台页面（文章列表、日志）都很长，滚到中部时
          「现在是谁登录的 / 退出」不该消失。侧栏的 top 值要和这里的 56px 对齐。 -->
-    <header class="sticky top-0 z-30 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-sm border-b dark:border-gray-700">
+    <Header v-if="reference" admin />
+    <header v-else class="sticky top-0 z-30 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-sm border-b dark:border-gray-700">
       <div class="container mx-auto px-4 max-w-7xl flex items-center gap-2.5 h-14">
         <NuxtLink to="/" class="flex items-center gap-2 shrink-0" aria-label="回到站点首页">
           <img src="/logo.svg" alt="" width="28" height="28" class="w-7 h-7 rounded-lg object-contain p-0.5 ring-1 ring-gray-300/70 dark:ring-gray-600"
@@ -37,20 +40,27 @@
       </nav>
     </header>
 
-    <div class="relative z-10 flex-1 container mx-auto px-4 py-6 max-w-7xl">
+    <div class="admin-workspace relative z-10 flex-1 container mx-auto px-4 py-6 max-w-7xl">
+      <details v-if="reference" ref="mobileAdminNav" class="edition-admin-mobile lg:hidden">
+        <summary>后台导航 <span>{{ menus.find(m => m.to === activeTo)?.label }}</span></summary>
+        <nav aria-label="后台导航" class="flex flex-wrap gap-2">
+          <NuxtLink v-for="m in menus" :key="m.to" :to="m.to" :aria-current="isActive(m.to) ? 'page' : undefined">{{ m.label }}</NuxtLink>
+        </nav>
+      </details>
       <div class="flex items-start gap-6">
 
         <!-- 左侧栏（lg 及以上）。12 个入口竖排，比横着排一长条更容易扫；
              分组标签只是视觉分隔，不参与权限判断。
              sticky 的 top 与顶栏 56px + 16px 间距对齐，滚到底也还在；
              自身限高可滚动：条目再多也够得着。 -->
-        <aside class="hidden lg:block w-44 shrink-0 sticky top-[4.5rem]">
+        <aside class="admin-rail hidden lg:block w-44 shrink-0 sticky top-[4.5rem]">
           <nav class="rounded-xl bg-white/70 dark:bg-white/5 backdrop-blur border border-gray-200 dark:border-gray-700 p-1.5 max-h-[calc(100vh-5.5rem)] overflow-y-auto">
+            <NuxtLink v-if="rail" to="/" class="edition-wordmark"><img src="/logo.svg" alt="" width="34" height="34" /><strong>{{ siteConfig?.siteName || '博观' }}</strong></NuxtLink>
             <template v-for="(g, gi) in menuGroups" :key="g.label">
               <p class="px-2.5 pb-1.5 text-[11px] tracking-wider text-gray-400 dark:text-gray-500 select-none"
                  :class="gi === 0 ? 'pt-1.5' : 'pt-3 mt-2 border-t border-gray-200/80 dark:border-gray-700'">{{ g.label }}</p>
               <NuxtLink v-for="m in g.items" :key="m.to" :to="m.to"
-                class="block px-2.5 py-1.5 rounded-lg text-sm transition"
+                class="block px-2.5 py-1.5 rounded-lg text-sm transition" :aria-current="isActive(m.to) ? 'page' : undefined"
                 :class="isActive(m.to)
                   ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 font-medium'
                   : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10'">{{ m.label }}</NuxtLink>
@@ -78,6 +88,11 @@
 definePageMeta({ middleware: 'admin' })
 const authStore = useAuthStore()
 const route = useRoute()
+const { current, reference, rail } = useReferenceShell()
+const { visible, mode, setImage } = useWallpaper()
+const mobileAdminNav = ref<HTMLDetailsElement | null>(null)
+watch(() => route.fullPath, () => { if (mobileAdminNav.value) mobileAdminNav.value.open = false })
+useHead({ htmlAttrs: { 'data-skin': () => reference.value ? current.value.id : undefined } })
 
 interface AdminMenu {
   to: string
@@ -149,7 +164,9 @@ const isActive = (to: string) => activeTo.value === to
 
 const progress = ref(0)
 const showTopBtn = ref(false)
-const bgImage = ref('')
+const { data: siteConfig } = await useSiteConfig()
+const bgImage = computed(() => siteConfig.value?.bgImage || '')
+watch([reference, bgImage], ([active, image]) => { if (active) setImage(image) }, { immediate: true })
 
 let rafId = 0
 
@@ -165,13 +182,8 @@ function onScroll() {
   })
 }
 
-onMounted(async () => {
+onMounted(() => {
   mounted.value = true
-  try {
-    const { get } = useApi()
-    const res = await get<any>('/site-config/public')
-    if (res.code === 200 && res.data) bgImage.value = res.data.bgImage || ''
-  } catch {}
   window.addEventListener('scroll', onScroll, { passive: true })
 })
 

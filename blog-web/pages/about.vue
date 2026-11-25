@@ -10,7 +10,7 @@
       </div>
     </div>
 
-    <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">友链</h2>
+    <h2 id="links" class="scroll-mt-20 text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">友链</h2>
     <div v-if="links.length === 0" class="text-gray-400 text-sm">暂无友链</div>
     <div v-else class="grid gap-3 sm:grid-cols-2">
       <a v-for="link in links" :key="link.id" :href="fixUrl(link.url)" target="_blank" rel="noopener" class="flex items-center gap-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 hover:shadow-md transition group">

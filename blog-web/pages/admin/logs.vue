@@ -68,8 +68,12 @@
       </div>
     </div>
 
-    <div v-if="!pending && logs.length === 0" class="text-center py-8 text-sm text-gray-400">
-      {{ status === 'fail' ? '没有失败记录 —— 这是好事' : '暂无日志' }}
+    <div v-if="error" role="alert" class="text-center py-8 text-sm">
+      操作日志读取失败。
+      <button type="button" @click="refresh()" class="text-primary-600 underline">重新加载</button>
+    </div>
+    <div v-else-if="!pending && logs.length === 0" class="text-center py-8 text-sm text-gray-400">
+      {{ status === 'fail' ? '没有失败记录' : '暂无日志' }}
     </div>
 
     <Pagination :current="page" :total="totalPages" @change="page = $event" />
@@ -99,14 +103,15 @@ const status = ref<'all' | 'fail' | 'ok'>('all')
  * handler 不会重跑，ref 是空的 —— 表现就是「明明有日志却显示暂无日志，
  * 点一下筛选才冒出来」。让 data 由 useAsyncData 自己持有才是对的。
  */
-const { data, pending } = await useAsyncData(
+const { data, pending, error, refresh } = await useAsyncData(
   () => `admin-logs-${status.value}-${page.value}`,
   async () => {
     const params = new URLSearchParams({ pageNum: String(page.value), pageSize: String(PAGE_SIZE) })
     if (status.value === 'fail') params.set('status', '0')
     if (status.value === 'ok') params.set('status', '1')
     const res = await get<any>(`/admin/log/list?${params.toString()}`)
-    return res.code === 200 ? res.data : { records: [], total: 0 }
+    if (res.code !== 200 || !res.data) throw new Error(res.message || '读取失败')
+    return res.data
   },
   { watch: [page, status] }
 )

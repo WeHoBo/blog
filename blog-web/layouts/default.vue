@@ -1,15 +1,11 @@
 ﻿<template>
-  <div
-    class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col relative"
-    :class="{ 'has-wallpaper': hasWallpaper }"
-  >
-    <!-- 壁纸层：模式由设置面板控制（横幅/全屏/覆盖/隐藏），无图时自动回落到纸面 -->
-    <WallpaperLayer />
+  <div class="min-h-screen flex flex-col relative" :class="{ 'edition-shell': reference, 'edition-side-shell': rail }">
+    <WallpaperLayer v-if="visible && (mode !== 'banner' || (homeBanner && currentSkin.layout !== 'platform'))" />
     <!-- 阅读进度条：用主题色，但只占 2px，不抢视觉 -->
     <div class="fixed top-0 left-0 z-50 h-0.5 bg-primary-600 transition-all" :style="{ width: progress + '%' }"></div>
     <div class="editorial relative z-10 flex flex-col flex-1">
       <Header />
-      <main id="site-main" class="flex-1 px-4">
+      <main id="site-main" class="flex-1 px-4" :class="{ 'home-banner': homeBanner && !reference }">
         <slot />
       </main>
       <Footer />
@@ -27,7 +23,24 @@
 
 <script setup lang="ts">
 // 站点配置统一走 useSiteConfig（内部用 useAsyncData，与首页共用同一次请求）
-const { mode, image, setImage } = useWallpaper()
+const { source, visible, mode, setImage } = useWallpaper()
+const route = useRoute()
+const homeBanner = computed(() => route.path === '/' && route.query.view !== 'articles' && !route.query.keyword && !route.query.tagId && !route.query.categoryId)
+
+/* ---------------------------------------------------------------
+   皮肤（风格）
+   ---------------------------------------------------------------
+   `data-skin` 走 useHead 写在 <html> 上，**服务端就能渲染**：
+   皮肤的纸面底色是纯 CSS（见 main.css），背景图和首页版式都按这个属性走，
+   这样 SSR 吐出来的第一帧就是用户选的那套，不会「先暖纸再变薄荷」。
+
+   为什么皮肤不在这里顺手改主题色相：
+   `--ph` 是 useThemeColor 用 inline style 写到 <html> 上的，SSR 阶段先按
+   nuxt.config 内联脚本从 localStorage 恢复 —— 那才是用户最后一次的选择。
+   在这里再写一遍会把它覆盖掉（刷新页面就回不去用户手动调过的色）。
+   色相由用户切换风格那一刻同步（Header 的 chooseSkin），这是唯一入口。
+   --------------------------------------------------------------- */
+const { current: currentSkin, reference, rail } = useReferenceShell()
 
 const progress = ref(0)
 const showTopBtn = ref(false)
@@ -51,21 +64,14 @@ function onScroll() {
 // 走 composables/useSiteConfig 而不是自己写 useAsyncData：首页横幅也要用同一份数据，
 // 固定 key 让两处共用一次请求（详情见那个文件的注释）。
 const { data: siteCfg } = await useSiteConfig()
-setImage(siteCfg.value?.bgImage || '')
+watch(() => siteCfg.value?.bgImage, url => setImage(url || ''), { immediate: true })
 
-/** 有图且没被「隐藏壁纸」关掉，才算真正启用壁纸 */
-const hasWallpaper = computed(() => !!image.value && mode.value !== 'none')
-
-/**
- * 把「有没有壁纸」写进 <html>，交给 CSS 决定正文上边距（见 main.css 的 #site-main 规则）。
- *
- * 为什么不用 computed 拼 class：上边距必须和 html[data-wallpaper] 在同一次绘制里生效，
- * 否则会先按 280px 画一帧、hydration 后再塌回去。htmlAttrs 是服务端就能渲染的，
- * 客户端又跟着 image 变化自动更新，正好满足这个要求。
- */
+// 服务端标记是否存在背景。首绘几何由 head 中提前恢复的 data-wallpaper 决定。
 useHead({
   htmlAttrs: {
-    'data-has-wallpaper': () => (hasWallpaper.value ? '1' : '0')
+    'data-has-wallpaper': () => (source.value === 'none' ? '0' : '1'),
+    // 皮肤 id 同时是 CSS 钩子（纸面底色、卡片圆角）与首页版式的开关
+    'data-skin': () => currentSkin.value.id
   }
 })
 
@@ -78,5 +84,5 @@ onBeforeUnmount(() => {
   if (rafId) cancelAnimationFrame(rafId)
 })
 
-function scrollToTop() { window.scrollTo({ top: 0, behavior: 'smooth' }) }
+function scrollToTop() { window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }) }
 </script>

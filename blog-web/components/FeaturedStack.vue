@@ -6,12 +6,13 @@
   <div class="h-full flex flex-col">
     <div class="flex items-center justify-between mb-2">
       <div class="text-[11px] font-bold text-gray-400 tracking-wide">
-        置顶<span v-if="articles.length" class="ml-1 font-normal opacity-70">· {{ articles.length }} 篇</span>
+        置顶<span v-if="articles.length" class="ml-1 font-normal opacity-70">· {{ total }} 篇</span>
       </div>
     </div>
 
     <!-- 空态：超管给一个直达入口，访客只看到一句说明 -->
-    <div v-if="!articles.length" class="flex-1 flex flex-col items-center justify-center text-center py-3">
+    <slot v-if="error && !articles.length" />
+    <div v-else-if="!articles.length" class="flex-1 flex flex-col items-center justify-center text-center py-3">
       <div class="w-8 h-8 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-300 dark:text-gray-600 mb-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M4 7h16M4 12h16M4 17h10"/></svg>
       </div>
@@ -37,11 +38,12 @@
       <!-- 展开态：限高滚动，不把顶部横幅撑破 -->
       <div v-else class="space-y-1.5 overflow-y-auto pr-0.5" style="max-height: 240px">
         <ArticleRow v-for="a in articles" :key="a.id" :article="a" />
+        <slot />
       </div>
 
       <button v-if="articles.length > 1" @click="open = !open"
         class="mt-2 inline-flex items-center gap-1 text-[11px] text-primary-600 dark:text-primary-400 hover:underline self-start">
-        {{ open ? '收起' : `展开全部 ${articles.length} 篇` }}
+        {{ open ? '收起' : `展开全部 ${total} 篇` }}
         <svg class="w-3 h-3 transition-transform duration-200" :class="open ? 'rotate-180' : ''"
           fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6"/></svg>
       </button>
@@ -53,6 +55,8 @@
 // 置顶文章来自首页的 SSR payload（`/article/list?top=1`），这里不做任何请求
 const props = withDefaults(defineProps<{
   articles: any[]
+  total: number
+  error?: boolean
 }>(), { articles: () => [] })
 
 /** 只能超管看到「去挑几篇」入口；mounted 后置 true，避免 SSR 水合不一致 */

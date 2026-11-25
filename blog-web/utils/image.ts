@@ -78,7 +78,7 @@ export function ossSrcSet(
 export const IMG_W = {
   /** 列表卡片封面（显示 144–300px，2 倍屏） */
   card: 640,
-  /** 详情页右侧方形缩略图（显示 80–128px） */
+  /** 小方图：素材库格子、个人中心头像（显示 80–128px） */
   thumb: 320,
   /** 头像（显示 24–56px） */
   avatar: 160,

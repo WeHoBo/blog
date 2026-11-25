@@ -1,77 +1,53 @@
+import { uploadResult } from '~/utils/upload'
+
 export const useUpload = () => {
   const config = useRuntimeConfig()
   const apiBase = config.public.apiBase
   const token = useCookie('token')
 
-  async function upload(file: File): Promise<string> {
+  async function sendFile(path: string, file: File): Promise<string> {
     const formData = new FormData()
     formData.append('file', file)
-    const res: any = await $fetch(`${apiBase}/upload`, {
+    const response = await $fetch.raw(path, {
       method: 'POST',
       body: formData,
-      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {}
-    })
-    if (res.code === 200) {
-      return res.data
-    }
-    throw new Error(res.message || '上传失败')
+      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      ignoreResponseError: true,
+      retry: 0
+    }).catch(() => { throw new Error('未能连接上传服务，请检查网络后重试') })
+    return uploadResult(response._data, response.status, response.headers.get('X-Request-Id'))
   }
 
-  /**
-   * 带进度的上传。这里直接用 XHR 逐块回报进度，行为可控、SSR 下也不会误触发。
-   */
+  async function upload(file: File): Promise<string> {
+    return sendFile(`${apiBase}/upload`, file)
+  }
+
   function uploadWithProgress(file: File, onProgress?: (percent: number) => void): Promise<string> {
     return new Promise((resolve, reject) => {
       const formData = new FormData()
       formData.append('file', file)
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${apiBase}/upload`)
-      if (token.value) {
-        xhr.setRequestHeader('Authorization', `Bearer ${token.value}`)
-      }
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && onProgress) {
-          onProgress(Math.round((e.loaded / e.total) * 100))
-        }
+      xhr.responseType = 'json'
+      if (token.value) xhr.setRequestHeader('Authorization', `Bearer ${token.value}`)
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100))
       }
       xhr.onload = () => {
         try {
-          const res = JSON.parse(xhr.responseText)
-          if (res.code === 200) {
-            resolve(res.data)
-          } else {
-            reject(new Error(res.message || '上传失败'))
-          }
-        } catch {
-          reject(new Error('服务器返回格式异常'))
+          resolve(uploadResult(xhr.response, xhr.status, xhr.getResponseHeader('X-Request-Id')))
+        } catch (error) {
+          reject(error)
         }
       }
-      xhr.onerror = () => reject(new Error('网络错误，上传失败'))
+      xhr.onerror = () => reject(new Error('未能连接上传服务，请检查网络后重试'))
       xhr.send(formData)
     })
   }
 
-  /**
-   * 上传头像：走 `/api/upload/avatar`，任何登录用户都能用。
-   *
-   * 不能用上面的 `upload()` —— 它打的是 `/api/upload`，那个接口是后台素材库入口，
-   * 后端标了 `@PreAuthorize("hasRole('admin')")`，普通用户必然 403。
-   * 头像接口只收图片、限 2MB、且不写素材库表，避免用户头像混进管理员素材库。
-   */
   async function uploadAvatar(file: File): Promise<string> {
-    // 头像框最大也就 96px，压到 512px 足够清晰，还能把几 MB 的原图降到几十 KB
     const small = await compressImage(file, 512, 0.9)
-    const formData = new FormData()
-    formData.append('file', small)
-    const res: any = await $fetch(`${apiBase}/upload/avatar`, {
-      method: 'POST',
-      body: formData,
-      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {}
-    })
-    if (res.code === 200) {
-      return res.data
-    }
-    throw new Error(res.message || '头像上传失败')
+    return sendFile(`${apiBase}/upload/avatar`, small)
   }
 
   /**

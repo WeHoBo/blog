@@ -14,7 +14,7 @@
     @scroll="onScroll">
     <slot />
     <!-- 底线：必须放在滚动内容里，要滚到底才看得到 -->
-    <div v-if="count > 0" class="flex items-center gap-3 pt-4 pb-1 select-none">
+    <div v-if="count > 0 && complete" class="flex items-center gap-3 pt-4 pb-1 select-none">
       <span class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></span>
       <span class="text-[11px] text-gray-300 dark:text-gray-600 tracking-wider">我是有底线的</span>
       <span class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></span>
@@ -28,13 +28,14 @@ const props = withDefaults(defineProps<{
   maxHeight?: number
   /** 条目数，用于决定要不要画底线；为 0 时不画 */
   count?: number
+  complete?: boolean
   /**
    * 是否启用内部滚动。默认 true，但**实际只在 ≥1280px 生效**（见 <style> 里
    * 的媒体查询）。显式传 false 时连类名都不加 —— 给「窄屏兜底区块」用，
    * 它本来就只出现在 <1280px，不需要任何内滚动相关样式。
    */
   scrollable?: boolean
-}>(), { maxHeight: 620, count: 0, scrollable: true })
+}>(), { maxHeight: 620, count: 0, scrollable: true, complete: true })
 
 /** 是否已经离开顶部。2px 容差：触控板的 1px 抖动不该让遮罩闪一下。 */
 const scrolled = ref(false)

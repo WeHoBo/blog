@@ -1,5 +1,5 @@
 ﻿<template>
-  <ArticleEditor :article-id="String($route.params.id)" />
+  <ArticleEditor :key="String($route.params.id)" :article-id="String($route.params.id)" />
 </template>
 
 <script setup lang="ts">

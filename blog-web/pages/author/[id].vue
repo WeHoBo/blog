@@ -1,6 +1,6 @@
 <template>
   <div class="max-w-5xl mx-auto px-4 py-6 lg:px-0">
-    <ArticleEditor mode="author" :article-id="String($route.params.id)" />
+    <ArticleEditor :key="String($route.params.id)" mode="author" :article-id="String($route.params.id)" />
   </div>
 </template>
 

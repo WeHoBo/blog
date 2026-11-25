@@ -1,5 +1,6 @@
 ﻿@import 'highlight.js/styles/github.css';
 
+@import './reference-layout.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -34,6 +35,68 @@ html {
   --primary: hsl(var(--ph), var(--ps), 52%);
 }
 
+/* ---- 皮肤：纸面底色 ----
+   主题色相不在这里改：那是 useThemeColor 用 inline style 写到 <html> 上的，
+   CSS 规则压不过内联样式，写在这里等于永远不生效。皮肤切换时由 JS 调 setHue。
+   ⚠️ 每条都带 :not(.dark)：不带的话 html[data-skin]（0,1,1）会压过 .dark（0,1,0），
+   暗色模式就被刷成浅底浅字，整页不可读。暗色下所有皮肤统一用那套暖墨底。
+   （`paper` 暖纸不在这里列：它就是要 html 默认的 hsl(38 30% 94%)。） */
+html[data-skin='default']:not(.dark) { --page-bg: hsl(201 52% 93%); }
+html[data-skin='sidebar']:not(.dark) { --page-bg: hsl(202 30% 96%); }
+html[data-skin='mint']:not(.dark) { --page-bg: hsl(150 24% 96%); }
+html[data-skin='sky']:not(.dark) { --page-bg: hsl(205 36% 96%); }
+.wallpaper-artwork[data-tone='light'] { --page-bg: hsl(38 30% 94%); }
+.wallpaper-artwork[data-tone='light'][data-skin='default'] { --page-bg: hsl(201 52% 93%); }
+.wallpaper-artwork[data-tone='light'][data-skin='sidebar'] { --page-bg: hsl(202 30% 96%); }
+.wallpaper-artwork[data-tone='light'][data-skin='mint'] { --page-bg: hsl(150 24% 96%); }
+.wallpaper-artwork[data-tone='light'][data-skin='sky'] { --page-bg: hsl(205 36% 96%); }
+.wallpaper-artwork[data-tone='dark'] { --page-bg: hsl(28 10% 8%); }
+
+/* ---- 毛玻璃面板 ----
+   默认风格的核心质感：所有卡片都是半透明压在背景图上，能看到后面的天和草。
+   用法是让组件把 `bg-white` **换成** `.glass`，而不是靠 !important 去盖 ——
+   两套背景色同时挂着的时候谁生效取决于源码顺序，那种写法迟早会翻车。 */
+.glass {
+  background-color: rgba(255, 255, 255, .78);
+  border-color: rgba(255, 255, 255, .8);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
+  backdrop-filter: blur(14px) saturate(115%);
+}
+/* 内容卡（文章卡、右栏面板）比容器更实一点：要读标题，不能让背景把字搅乱 */
+.glass-solid {
+  background-color: rgba(255, 255, 255, .92);
+  border-color: rgba(255, 255, 255, .85);
+}
+.dark .glass,
+.dark .glass-solid {
+  background-color: rgba(31, 29, 26, .66);
+  border-color: rgba(255, 255, 255, .08);
+}
+
+/* 精品卡的主题色描边。
+   ⚠️ 必须写成 `.glass-solid.article-card--featured`（0,2,0）才压得住上面那条
+   `.glass-solid { border-color }`（0,1,0）—— 直接写 `border-primary-200` 会被
+   毛玻璃的白描边盖掉，精品卡和普通卡就长得一模一样了。 */
+.glass-solid.article-card--featured { border-color: hsl(var(--ph) var(--ps) 84%); }
+.glass-solid.article-card--featured:hover { border-color: hsl(var(--ph) var(--ps) 70%); }
+.dark .glass-solid.article-card--featured { border-color: hsl(var(--ph) var(--ps) 30%); }
+.dark .glass-solid.article-card--featured:hover { border-color: hsl(var(--ph) var(--ps) 48%); }
+
+/* 薄荷 / 晴空这两套的设计语言就是「大圆角卡片 + 更软的落影」。
+   只放大圆角，不动间距与字号 —— 信息层级还是同一套，换皮肤不该改变阅读节奏。
+   （选择器 (0,2,1) 稳压 Tailwind 的 `rounded-xl` (0,1,0)，不靠源码顺序取胜。） */
+html[data-skin='mint'] .article-card,
+html[data-skin='sky'] .article-card {
+  border-radius: 1.5rem;
+}
+
+/* 风格渐变和站点主图使用相同的定位、滚动和隐藏规则。 */
+.skin-wp-image { background-image: var(--skin-gradient); }
+.dark .skin-wp-image { background-image: var(--skin-gradient-dark); }
+.skin-texture { opacity: .55; }
+.dark .skin-texture { opacity: .22; }
+html:not([data-wallpaper="banner"]) .banner-waves { display: none; }
+
 /* 锚点跳转避让固定顶部导航（Header 高约 64px）：
    点目录条目或 "#xxx" 链接时，目标标题不再被顶栏遮住。
    对所有带 id 的元素生效，是「固定头部 + 锚点」的标准做法。 */
@@ -62,6 +125,14 @@ body {
   font-family: Georgia, 'Songti SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'STSong', 'SimSun', serif;
   letter-spacing: 0.01em;
 }
+/* 例外：首页横幅那句「口号」保持黑体。
+   它是 slogan 不是文章标题，中文衬线 + 800 字重在多数系统上会变成伪粗体的糊字；
+   选择器特意写成 `.editorial h1.hero-title`（0,2,1）压过上面那条（0,1,1），
+   不靠源码顺序取胜。 */
+.editorial h1.hero-title {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  letter-spacing: -0.015em;
+}
 
 /* 选中文本用主题淡色，不用浏览器默认的亮蓝 */
 ::selection {
@@ -86,12 +157,12 @@ select:focus-visible {
 .dark .theme-text { color: var(--primary); }
 .theme-text-hover { color: var(--primary-dark); }
 .dark .theme-text-hover { color: var(--primary); }
-/* 标签改成「纸标签」：中性底 + 细描边，不再每个模块一块彩色底。
-   彩色只留给链接、下划线等真正需要引导视线的地方。 */
+/* 纸标签：改成「白玻璃小胶囊」而不是暖米色。
+   默认风格底下是蓝天渐变，暖米色压在蓝上会发脏；白色在纸面和天空下都成立。 */
 .theme-chip {
-  background: hsl(37 26% 91%);
+  background: rgba(255, 255, 255, .72);
   color: hsl(28 12% 32%);
-  border: 1px solid hsl(36 20% 84%);
+  border: 1px solid rgba(255, 255, 255, .92);
 }
 .dark .theme-chip {
   background: rgba(255, 255, 255, 0.05);
@@ -123,13 +194,16 @@ strong, b { color: hsl(26 12% 16%); }
 .article-content h2 { @apply text-2xl font-bold mt-8 mb-4 pb-1 border-b dark:border-gray-700; }
 .article-content h3 { @apply text-xl font-semibold mt-6 mb-3; }
 .article-content h4 { @apply text-lg font-semibold mt-4 mb-2; }
-.article-content p { @apply my-4 leading-relaxed text-gray-700 dark:text-gray-300 text-base; }
+/* 正文 17px / 行高 1.8（原来 16px / 1.625）。
+   704px 栏宽下 16px 一行约 44 个汉字，密到要拿手指串行；17px 配 1.8 后
+   一段四五行的长文连读两三千字不容易串。手机端同样是 17px —— 再小就回到原点了。 */
+.article-content p { @apply my-5 text-gray-700 dark:text-gray-300; font-size: 1.0625rem; line-height: 1.8; }
 .article-content a { @apply text-primary-600 dark:text-primary-400 hover:underline; }
 .article-content strong { @apply font-semibold text-gray-900 dark:text-gray-100; }
 .article-content blockquote { @apply border-l-4 border-primary-400 pl-4 my-6 py-1 bg-gray-50 dark:bg-gray-800/50 rounded-r text-gray-600 dark:text-gray-400 italic; }
 .article-content ul { @apply list-disc pl-6 my-4 space-y-1; }
 .article-content ol { @apply list-decimal pl-6 my-4 space-y-1; }
-.article-content li { @apply text-gray-700 dark:text-gray-300; }
+.article-content li { @apply text-gray-700 dark:text-gray-300; font-size: 1.0625rem; line-height: 1.8; }
 .article-content img { @apply max-w-full rounded-lg my-6 mx-auto shadow-md; }
 .article-content table { @apply w-full border-collapse my-6; }
 .article-content th, .article-content td { @apply border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm; }
@@ -298,6 +372,10 @@ html[data-wallpaper="cover"] #wallpaper-layer .wp-image {
   background-repeat: repeat-y;
   background-position: center top;
 }
+html[data-wallpaper="cover"] #wallpaper-layer .skin-wp-image {
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
 /* 隐藏：直接不渲染（Vue 侧同时会切到纸面背景） */
 html[data-wallpaper="none"] #wallpaper-layer { display: none; }
 
@@ -306,16 +384,18 @@ html[data-wallpaper="none"] #wallpaper-layer { display: none; }
 .dark #wallpaper-layer .wp-scrim-light { display: none; }
 .dark #wallpaper-layer .wp-scrim-dark { display: block; }
 
-html[data-wallpaper="banner"] .wp-scrim-light {
+html[data-wallpaper="banner"] .wp-scrim-light,
+.banner-preview-scrim-light {
   background: linear-gradient(to bottom, rgba(0, 0, 0, .10) 0%, rgba(0, 0, 0, 0) 45%, var(--page-bg) 100%);
 }
 html[data-wallpaper="full"] .wp-scrim-light {
-  background: linear-gradient(to bottom, rgba(247, 242, 232, .55), rgba(247, 242, 232, .72));
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--page-bg) 55%, transparent), color-mix(in srgb, var(--page-bg) 72%, transparent));
 }
 html[data-wallpaper="cover"] .wp-scrim-light {
-  background: linear-gradient(to bottom, rgba(247, 242, 232, .62), rgba(247, 242, 232, .80));
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--page-bg) 62%, transparent), color-mix(in srgb, var(--page-bg) 80%, transparent));
 }
-html[data-wallpaper="banner"] .wp-scrim-dark {
+html[data-wallpaper="banner"] .wp-scrim-dark,
+.banner-preview-scrim-dark {
   background: linear-gradient(to bottom, rgba(18, 16, 13, .58) 0%, rgba(18, 16, 13, .44) 42%, var(--page-bg) 100%);
 }
 html[data-wallpaper="full"] .wp-scrim-dark {
@@ -417,9 +497,9 @@ html[data-wallpaper="cover"] .wp-scrim-dark {
 /* 正文上边距：横幅模式要让首屏卡片压在图片下沿，其余模式贴着导航栏开始。
    用 ID 选择器而不是 Tailwind 类，避免和组件里的 pt-* 打架。 */
 #site-main { padding-top: 4rem; }
-html[data-has-wallpaper="1"][data-wallpaper="banner"] #site-main { padding-top: 280px; }
+html[data-has-wallpaper="1"][data-wallpaper="banner"] #site-main.home-banner { padding-top: 280px; }
 @media (min-width: 640px) {
-  html[data-has-wallpaper="1"][data-wallpaper="banner"] #site-main { padding-top: 300px; }
+  html[data-has-wallpaper="1"][data-wallpaper="banner"] #site-main.home-banner { padding-top: 300px; }
 }
 @media (min-width: 1024px) {
   #site-main { padding-top: 5rem; }

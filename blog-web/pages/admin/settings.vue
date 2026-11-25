@@ -1,7 +1,12 @@
 ﻿<template>
-  <div class="max-w-2xl">
+  <div class="edition-settings max-w-2xl">
     <h1 class="text-2xl font-bold mb-1">站点设置</h1>
-    <p class="text-xs text-gray-400 mb-6">这里的改动保存后会立即清掉页面缓存，回首页刷新一次就能看到。</p>
+    <p v-if="loadError" role="alert" class="my-4 text-sm text-red-600">
+      站点设置读取失败。
+      <button type="button" class="underline" @click="refresh()">重新加载</button>
+    </p>
+    <p v-else-if="pending" role="status" class="my-4 text-sm">正在读取设置…</p>
+    <fieldset v-if="ready" :disabled="saving" class="mt-4 min-w-0">
 
     <!-- 基础信息 -->
     <section class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 space-y-4 mb-4">
@@ -42,13 +47,17 @@
       <div>
         <label class="field-label" for="set-bgImage">自定义背景图</label>
         <div class="flex gap-2">
-          <input id="set-bgImage" v-model="form.bgImage" autocomplete="off" placeholder="背景图片URL" class="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
-          <label class="px-3 py-2 border-2 border-dashed rounded-lg text-xs cursor-pointer hover:border-primary-500 hover:text-primary-500 whitespace-nowrap flex items-center">
-            <input type="file" accept="image/*" class="hidden" @change="uploadBg" />
-            {{ bgUploading ? '上传中...' : '上传' }}
+          <input id="set-bgImage" v-model="form.bgImage" @input="cancelUpload" autocomplete="off" placeholder="背景图片 URL" class="min-w-0 flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
+          <label class="relative px-3 py-2 border-2 border-dashed rounded-lg text-xs cursor-pointer focus-within:ring-2 hover:border-primary-500 whitespace-nowrap flex items-center">
+            <input type="file" :accept="backgroundAccept" class="absolute inset-0 opacity-0 w-full cursor-pointer" aria-label="上传背景图片" @change="uploadBg" />
+            {{ bgUploading ? '重新选图' : '上传图片' }}
           </label>
         </div>
-        <button v-if="form.bgImage" @click="form.bgImage = ''" class="text-xs text-red-500 hover:underline mt-1">清除背景</button>
+        <p class="hint">支持 {{ backgroundFormats }}，单张最多 10 MiB。</p>
+        <p v-if="uploadError" role="alert" class="text-sm text-red-600 break-words select-text">{{ uploadError }}</p>
+        <p v-else role="status" class="text-xs mt-1">{{ bgUploading ? '正在上传图片…' : backgroundStatus }}</p>
+        <button v-if="form.bgImage || bgUploading" type="button" @click="cancelUpload(); form.bgImage = ''" class="text-xs text-red-500 hover:underline mt-1">清除背景</button>
+        <AdminBackgroundPreview :draft="form" />
       </div>
 
       <!-- 头像：统一用站点 logo。原来这里有个「博主头像URL」输入框，
@@ -140,21 +149,27 @@
     </section>
 
     <div class="sticky bottom-4">
-      <button @click="handleSave" :disabled="saving"
+      <button @click="handleSave" :disabled="saving || bgUploading || !hasChanges"
         class="px-6 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm transition disabled:opacity-50 shadow-sm">
         {{ saving ? '保存中…' : '保存' }}
       </button>
     </div>
+    </fieldset>
   </div>
 </template>
 
 <script setup lang="ts">
 import { SITE_CONFIG_KEY } from '~/composables/useSiteConfig'
+import type { SiteConfig } from '~/composables/useSiteConfig'
+import { backgroundAccept, backgroundFormats, validateBackground } from '~/utils/upload'
 
 definePageMeta({ middleware: 'admin', layout: 'admin' })
 const { get, post } = useApi()
 const { toast } = useFeedback()
 const bgUploading = ref(false)
+const uploadError = ref('')
+const backgroundStatus = ref('')
+let uploadSequence = 0
 const saving = ref(false)
 const purging = ref(false)
 const { upload } = useUpload()
@@ -181,39 +196,42 @@ function parseQuestions(raw: string | undefined): string[] {
   }
 }
 
-/**
- * ⚠️ 这里必须 `await useAsyncData`，不能用「setup 里直接发请求」的写法。
- *
- * 原来的写法是 `fetchConfig()` 不 await：服务端渲染时表单还没拿到数据就把 HTML 吐出去了，
- * 页面一进来是一排空格子；等客户端的请求回来，Vue 只更新了数据、没把值写回已存在的
- * input DOM —— 表现就是「字段全空，但随便动一个格子，其它格子的原值才冒出来」。
- * 用 useAsyncData 的好处是：数据进 SSR payload，首屏 HTML 里就是真值，不存在这个时序。
- */
-const { data: initial } = await useAsyncData('admin-site-config', async () => {
-  try {
-    const res = await get<any>('/site-config/public')
-    return (res?.code === 200 ? res.data : {}) || {}
-  } catch {
-    return {}
-  }
+const { data: initial, error: loadError, pending, refresh } = await useAsyncData('admin-site-config', async () => {
+  const res = await get<{ code: number; data: SiteConfig; message?: string }>('/site-config/public')
+  if (res.code !== 200 || !res.data) throw new Error(res.message || '读取站点设置失败')
+  return res.data
 })
 
-const cfg = (initial.value || {}) as Record<string, string>
-
+const ready = computed(() => !!initial.value && !loadError.value && !pending.value)
 const form = reactive({
-  siteName: cfg.siteName || '',
-  siteDesc: cfg.siteDesc || '',
-  aboutContent: cfg.aboutContent || '',
-  bgImage: cfg.bgImage || '',
-  bloggerName: cfg.bloggerName || '',
-  bloggerBio: cfg.bloggerBio || '',
-  // 没配过就给一个默认值，省得每次都要自己想一遍填什么
-  bloggerFocus: cfg.bloggerFocus || 'Java,AI,Python,Linux,Docker',
-  aiName: cfg.aiName || '',
-  aiGreeting: cfg.aiGreeting || ''
+  siteName: '', siteDesc: '', aboutContent: '', bgImage: '', bloggerName: '',
+  bloggerBio: '', bloggerFocus: '', aiName: '', aiGreeting: ''
 })
-
-const questions = ref<string[]>(parseQuestions(cfg.aiQuestions))
+const questions = ref<string[]>([])
+const baseline = ref<Record<string, string>>({})
+const values = computed<Record<string, string>>(() => ({
+  siteName: form.siteName.trim(),
+  siteDesc: form.siteDesc.trim(),
+  aboutContent: form.aboutContent,
+  bgImage: form.bgImage.trim(),
+  bloggerName: form.bloggerName.trim(),
+  bloggerBio: form.bloggerBio,
+  bloggerFocus: parseFocus(form.bloggerFocus),
+  aiName: form.aiName.trim(),
+  aiGreeting: form.aiGreeting.trim(),
+  aiQuestions: JSON.stringify([...new Set(questions.value.map(s => s.trim()).filter(Boolean))])
+}))
+const changes = computed(() => Object.fromEntries(
+  Object.entries(values.value).filter(([key, value]) => baseline.value[key] !== value)
+))
+const hasChanges = computed(() => Object.keys(changes.value).length > 0)
+watch(initial, cfg => {
+  if (!cfg) return
+  for (const key of Object.keys(form) as (keyof typeof form)[]) form[key] = cfg[key] ?? ''
+  form.bloggerFocus = cfg.bloggerFocus ?? 'Java,AI,Python,Linux,Docker'
+  questions.value = parseQuestions(cfg.aiQuestions)
+  baseline.value = { ...values.value }
+}, { immediate: true })
 
 function addQuestion() {
   if (questions.value.length >= 30) {
@@ -227,51 +245,56 @@ function removeQuestion(i: number) {
   questions.value.splice(i, 1)
 }
 
+function cancelUpload() {
+  uploadSequence++
+  bgUploading.value = false
+  backgroundStatus.value = ''
+  uploadError.value = ''
+}
+
 async function uploadBg(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
+  input.value = ''
   if (!file) return
+  cancelUpload()
+  const sequence = uploadSequence
+  uploadError.value = validateBackground(file)
+  if (uploadError.value) return
   bgUploading.value = true
   try {
-    form.bgImage = await upload(file)
-    toast('上传成功', 'success')
-  } catch (e: any) {
-    toast('上传失败: ' + (e.message || '未知错误'), 'error')
+    const url = await upload(file)
+    if (sequence !== uploadSequence) return
+    form.bgImage = url
+    backgroundStatus.value = '图片已上传，保存后生效。'
+  } catch (e) {
+    if (sequence === uploadSequence) uploadError.value = e instanceof Error ? e.message : '上传失败，请重试'
   } finally {
-    bgUploading.value = false
-    input.value = ''
+    if (sequence === uploadSequence) bgUploading.value = false
   }
 }
+onBeforeUnmount(cancelUpload)
+
+const { data: publicConfig } = useNuxtData<SiteConfig>(SITE_CONFIG_KEY)
+const { setImage } = useWallpaper()
 
 async function handleSave() {
-  if (saving.value) return
+  if (!ready.value || saving.value || bgUploading.value || !hasChanges.value) return
   saving.value = true
+  const payload = { ...changes.value }
   try {
-    const pool = [...new Set(questions.value.map((s) => String(s || '').trim()).filter(Boolean))]
-    const payload: Record<string, string> = {
-      siteName: form.siteName.trim(),
-      siteDesc: form.siteDesc.trim(),
-      aboutContent: form.aboutContent,
-      bgImage: form.bgImage,
-      bloggerName: form.bloggerName.trim(),
-      bloggerBio: form.bloggerBio,
-      bloggerFocus: parseFocus(form.bloggerFocus),
-      aiName: form.aiName.trim(),
-      aiGreeting: form.aiGreeting.trim(),
-      aiQuestions: JSON.stringify(pool)
-    }
     const res = await post<{ code: number; message?: string }>('/site-config/save', payload)
-    if (res?.code !== 200) {
-      toast(res?.message || '保存失败', 'error')
-      return
+    if (res.code !== 200) throw new Error(res.message || '保存失败')
+    initial.value = { ...initial.value, ...payload }
+    publicConfig.value = { ...publicConfig.value, ...payload }
+    if ('bgImage' in payload) {
+      setImage(payload.bgImage)
+      backgroundStatus.value = '背景已保存。'
     }
-    questions.value = pool
-    // 站点配置是 useAsyncData 按 key 缓存的，不清掉的话 SPA 内切到首页还是旧文案
-    clearNuxtData(SITE_CONFIG_KEY)
-    await purgeCache()
-    toast('保存成功', 'success')
-  } catch (e: any) {
-    toast(e.message || '保存失败', 'error')
+    const purged = await purgeCache()
+    toast(purged ? '站点设置已保存' : '设置已保存，公开页面将在缓存到期后更新', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '保存失败', 'error')
   } finally {
     saving.value = false
   }

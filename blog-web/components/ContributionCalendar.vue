@@ -1,7 +1,7 @@
 <template>
-  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+  <div class="glass rounded-2xl shadow-sm overflow-hidden">
     <!-- 头部：标题 + 月份切换（只允许往回看，未来月份没有意义） -->
-    <div class="px-3 py-2.5 border-b dark:border-gray-700 flex items-center justify-between gap-2">
+    <div class="px-3 py-2.5 border-b border-white/70 dark:border-gray-700 flex items-center justify-between gap-2">
       <h3 class="text-xs font-bold text-gray-900 dark:text-gray-100">发布热力</h3>
       <div class="flex items-center gap-0.5">
         <button @click="step(-1)" class="w-6 h-6 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center justify-center" title="上个月" aria-label="上个月">
@@ -15,7 +15,11 @@
       </div>
     </div>
 
-    <div class="px-3 pt-2 pb-3">
+    <div v-if="status === 'error'" class="px-3 py-4 text-xs text-gray-500" role="status">
+      本月发布记录加载失败。<button type="button" class="text-primary-600 underline" @click="refresh()">重试</button>
+    </div>
+    <div v-else-if="status === 'pending'" class="px-3 py-4 text-xs text-gray-500" role="status">正在加载本月记录…</div>
+    <div v-else class="px-3 pt-2 pb-3">
       <div class="grid grid-cols-7 gap-1 mb-1">
         <span v-for="w in WEEK" :key="w" class="text-[10px] text-gray-300 dark:text-gray-600 text-center leading-none">{{ w }}</span>
       </div>
@@ -57,21 +61,14 @@ const atCurrent = computed(() => month.value >= monthKeyOf())
  * 每月的数据按月份 key 缓存（useAsyncData 同一个 key 只请求一次）。
  * 往回翻几个月再翻回来不会重复打接口，也不会重复渲染。
  */
-const { data } = useAsyncData(
+const { data, status, refresh } = useAsyncData(
   () => `contribution:${month.value}`,
   async () => {
-    try {
-      const res = await get<any>(`/article/contribution?month=${month.value}`)
-      if (res?.code === 200 && res.data) {
-        return {
-          days: (res.data.days || {}) as Record<string, number>,
-          total: Number(res.data.total || 0)
-        }
-      }
-    } catch { /* 接口挂了不该让首页报错 */ }
-    return { days: {} as Record<string, number>, total: 0 }
+    const res = await get<any>(`/article/contribution?month=${month.value}`)
+    if (res?.code !== 200 || !res.data) throw new Error('本月发布记录加载失败')
+    return { days: (res.data.days || {}) as Record<string, number>, total: Number(res.data.total || 0) }
   },
-  { watch: [month], default: () => ({ days: {}, total: 0 }) }
+  { default: () => ({ days: {} as Record<string, number>, total: 0 }) }
 )
 
 const days = computed(() => data.value?.days || {})

@@ -164,7 +164,7 @@
               <!-- maxlength 与 RAG ChatRequest 的上限是两层保险：这里 2000 是产品约束
                    （手打提问不该这么长），后端 8000 是兜底（给"带内容"的程序化提问留余量）。
                    没有 maxlength 时，粘一大段进来直接 422，用户看不到任何字数提示。 -->
-              <textarea v-model="input" @keydown.enter.exact.prevent="sendInput" rows="1"
+              <textarea v-model="input" @keydown.enter.exact="onInputEnter" rows="1"
                 maxlength="2000"
                 placeholder="输入问题，Enter 发送 / Shift+Enter 换行"
                 class="flex-1 resize-none px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 text-sm focus:border-primary-400 focus:outline-none transition max-h-32 min-h-[42px]"
@@ -454,6 +454,12 @@ watch(open, (v) => {
   }
 })
 
+function onInputEnter(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  sendInput()
+}
+
 function sendInput() {
   const q = (input.value || '').trim()
   if (!q || streaming.value) return
@@ -500,4 +506,7 @@ function sendInput() {
 .ai-window-enter-active { transition: opacity .2s ease, transform .2s ease; }
 .ai-window-leave-active { transition: opacity .15s ease, transform .15s ease; }
 .ai-window-enter-from, .ai-window-leave-to { opacity: 0; transform: translateY(12px) scale(.97); }
+@media (prefers-reduced-motion: reduce) {
+  .ai-window-enter-active, .ai-window-leave-active { transition: none; }
+}
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6">
+  <div class="edition-report space-y-6">
     <!-- 标题 + 范围 -->
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <div>
@@ -23,7 +23,7 @@
     </div>
 
     <!-- ① 数字卡 -->
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="stats-row grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-paper p-4">
         <div class="text-xs text-gray-400">今日金额</div>
         <div class="mt-2 text-2xl font-bold tabular-nums">¥{{ money(summary?.todayCost) }}</div>

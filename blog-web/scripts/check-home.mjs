@@ -73,7 +73,7 @@ const editor = read(files.editor)
 console.log('首页布局')
 
 check('横幅中间是置顶堆叠', () => {
-  must(idx, '<FeaturedStack :articles="pinned" />', '横幅那块小堆叠放置顶')
+  must(idx, '<FeaturedStack :articles="pinned"', '横幅那块小堆叠放置顶')
 })
 
 check('横幅不再有统计数字列', () => {
@@ -109,15 +109,24 @@ check('左栏顺序：个人信息 → 分类 → 热力图', () => {
 
 check('中间是滚动屏，不再分页', () => {
   // 不匹配整个标签：中栏那个 ScrollPane 带 v-else（只在非筛选态渲染），
-  // 写成 '<ScrollPane :max-height="620"' 永远匹配不到 —— 这条断言曾因此长期误报
-  must(idx, ':max-height="620"', '中栏必须包一层滚动屏（620 与右栏 sidePaneMax 对齐）')
+  // 写成 '<ScrollPane :max-height="620"' 永远匹配不到 —— 这条断言曾因此长期误报。
+  //
+  // 2026-11-24 晚的定稿：中栏高度 1040，**要比左右两栏（742）明显长**，
+  // 观感上像「拾光手记」那种一条长到底的列表；620 那版会卡在比左右两栏还矮 76px 的位置。
+  const tag = idx.match(/<ScrollPane[^>]*>/)
+  if (!tag) throw new Error('中栏没找到 <ScrollPane>')
+  const mh = tag[0].match(/:max-height="(\d+)"/)
+  if (!mh) throw new Error('中栏 ScrollPane 缺 :max-height（不设就永远 620 的默认值）')
+  if (Number(mh[1]) < 900) {
+    throw new Error(`中栏 :max-height=${mh[1]} 太矮，必须 ≥900（左右两栏是 742，要比它们明显长）`)
+  }
   must(idx, ':count="centerArticles.length"', '滚动屏要知道条数以决定画不画底线')
   mustNot(idx, '<Pagination', '分页会把「我是有底线的」设计破坏掉')
 })
 
 check('中栏放精品，且与横幅的置顶是两条独立查询', () => {
-  must(idx, 'featured=1&pageSize=${LIST_PAGE_SIZE}', '中栏取精品')
-  must(idx, 'top=1&pageSize=${LIST_PAGE_SIZE}', '横幅取置顶（独立请求，不共享数据）')
+  must(idx, "new URLSearchParams({ featured: '1' })", '中栏取精品')
+  must(idx, "new URLSearchParams({ top: '1' })", '横幅取置顶（独立请求，不共享数据）')
   must(idx, 'filtered.value ? articles.value : featured.value', '中栏数据源必须是精品')
   mustNot(idx, 'featured.slice', '精品不设篇数上限')
   mustNot(idx, 'pinned.slice', '置顶不设篇数上限')
@@ -131,12 +140,18 @@ check('窄屏补一份全部文章，且关掉内滚动', () => {
 console.log('\n右栏「全部文章」')
 
 check('右栏固定为列表形态（ArticleRow），不再有网格分支', () => {
-  // 右栏是模板里最后一个 <aside>（左栏是第一个）；切到 <Teleport> 之前，避免把脚本也扫进来
-  const start = idx.lastIndexOf('<aside')
-  const end = idx.indexOf('<Teleport', start)
+  // ⚠️ 2026-11-24 起首页有两块右栏：
+  //   - 系列主导版式的「按主题找文章」（w-[22rem]）
+  //   - 常态的「最新」（w-[25rem]，ArticleRow）
+  // 原来靠「最后一个 <aside>」定位，加了第二块之后就指错了。
+  // 现在先找 w-[25rem] 这个宽度标记，再往前回退到它的 <aside> 开头。
+  const anchor = idx.indexOf('w-[25rem]')
+  if (anchor < 0) throw new Error('找不到常态右栏（w-[25rem]）')
+  const start = idx.lastIndexOf('<aside', anchor)
+  const end = idx.indexOf('</aside>', anchor)
   const aside = idx.slice(start, end > 0 ? end : undefined)
   must(aside, '<ArticleRow', '固定用紧凑行')
-  mustNot(aside, 'layout="grid"', '第二轮明确要求右栏固定列表，不参与布局切换')
+  mustNot(aside, 'layout="grid"', '右栏固定列表，不参与布局切换')
   mustNot(aside, 'ArticleCard', '右栏不再用大卡片')
 })
 
@@ -152,7 +167,7 @@ check('右栏自己一个 ScrollPane（与中栏不同步滚动）', () => {
 
 check('右栏常态排除精品文章（不排除置顶）', () => {
   must(idx, "params.set('featured', '0')", '否则精品在中间和右侧各出现一次')
-  must(idx, "if (!filtered.value)", '过滤只能发生在非筛选态，搜索时排除精品会漏结果')
+  must(idx, "if (!filtered.value && !referenceEdition.value)", '搜索和整站时间流需包含精品，旧版首页右栏排除精品')
   mustNot(idx, "params.set('top', '0')", '置顶仍要留在全部文章里，它只是横幅的快捷入口')
 })
 
@@ -175,7 +190,7 @@ check('底线在滚动内容内部（要滚到底才看得到）', () => {
   const lineAt = pane.indexOf('我是有底线的')
   if (slotAt === -1 || lineAt === -1) throw new Error('缺 slot 或底线文案')
   if (lineAt < slotAt) throw new Error('底线跑到内容之前了，会一直显示在顶上')
-  must(pane, 'v-if="count > 0"', '没有条目时不该画底线')
+  must(pane, 'v-if="count > 0 && complete"', '没有条目或还有下一页时不画底线')
 })
 
 check('顶部渐隐用 mask-image', () => {

@@ -27,36 +27,25 @@ export default defineNuxtConfig({
       '/api/**': {
         proxy: 'http://127.0.0.1:8080/api/**'
       },
+      '/uploads/**': {
+        proxy: 'http://127.0.0.1:8080/uploads/**'
+      },
       // sitemap 由后端 SitemapController 动态生成（含最新文章），
       // 这里转发一层，使 https://codeup.asia/sitemap.xml 可直接访问，无需再改 nginx
       '/sitemap.xml': {
         proxy: 'http://127.0.0.1:8080/sitemap.xml'
       },
 
-      // ---- 公开页缓存（P2-9）----
-      // 一篇文章要串 5 个接口才吐出 HTML，每次访问都重算一遍很浪费。这里给公开页一个
-      // **很短的** SWR 窗口：窗口内复用同一份 HTML；过期后先返回旧页、后台重新渲染，
-      // 所以访客永远不等 SSR（响应永远来自内存）。
-      //
-      // 两个必须注意的点：
-      // 1. `varies: ['cookie']` 不能省 —— 顶部导航按登录态渲染（isLoggedIn 读 cookie），
-      //    不分桶会把某个人的登录态发给所有人。没有 token cookie 的匿名访客共用一份缓存，
-      //    这才是收益所在。
-      // 2. 详情页的阅读数改为浏览器打点（POST /api/article/{id}/view），
-      //    否则缓存窗口内的访问都不会被计入（见 ArticleDetail.vue）。
-      //
-      // 窗口值：详情页 10s、首页 20s、聚合页 30–60s、静态页 2–5min。
-      // 后台 / 个人中心 / 登录 / OAuth / AI 一律不缓存（没有规则 = 不缓存）。
-      '/': { cache: { maxAge: 20, swr: true, varies: ['cookie'] } },
-      '/post/**': { cache: { maxAge: 10, swr: true, varies: ['cookie'] } },
-      '/article/**': { cache: { maxAge: 10, swr: true, varies: ['cookie'] } },
-      '/tag/**': { cache: { maxAge: 30, swr: true, varies: ['cookie'] } },
-      '/category/**': { cache: { maxAge: 30, swr: true, varies: ['cookie'] } },
-      '/archive': { cache: { maxAge: 30, swr: true, varies: ['cookie'] } },
-      '/tags': { cache: { maxAge: 60, swr: true, varies: ['cookie'] } },
-      '/categories': { cache: { maxAge: 60, swr: true, varies: ['cookie'] } },
-      '/about': { cache: { maxAge: 120, swr: true, varies: ['cookie'] } },
-      '/privacy': { cache: { maxAge: 300, swr: true, varies: ['cookie'] } }
+      // SSR 和浏览器/代理缓存均按 cookie 区分登录态和皮肤。
+      // 详情页每次渲染时确认发布状态，撤稿后应立即停止提供正文。
+      '/': { headers: { Vary: 'Cookie' }, cache: { maxAge: 20, swr: true, varies: ['cookie'] } },
+      '/tag/**': { headers: { Vary: 'Cookie' }, cache: { maxAge: 30, swr: true, varies: ['cookie'] } },
+      '/category/**': { headers: { Vary: 'Cookie' }, cache: { maxAge: 30, swr: true, varies: ['cookie'] } },
+      '/archive': { headers: { Vary: 'Cookie' }, cache: { maxAge: 30, swr: true, varies: ['cookie'] } },
+      '/tags': { headers: { Vary: 'Cookie' }, cache: { maxAge: 60, swr: true, varies: ['cookie'] } },
+      '/categories': { headers: { Vary: 'Cookie' }, cache: { maxAge: 60, swr: true, varies: ['cookie'] } },
+      '/about': { headers: { Vary: 'Cookie' }, cache: { maxAge: 120, swr: true, varies: ['cookie'] } },
+      '/privacy': { headers: { Vary: 'Cookie' }, cache: { maxAge: 300, swr: true, varies: ['cookie'] } }
     }
   },
 

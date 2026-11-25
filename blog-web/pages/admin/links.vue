@@ -83,8 +83,13 @@ const editId = ref<number | null>(null)
 const dialogForm = reactive({ name: '', url: '', avatar: '', description: '', sort: 0, status: 1 })
 
 async function fetchList() {
-  const res = await get<any>('/friend-link/list')
-  if (res.code === 200) links.value = res.data || []
+  try {
+    const res = await get<any>('/friend-link/admin/list')
+    if (res.code !== 200) throw new Error(res.message || '读取友链失败')
+    links.value = res.data || []
+  } catch (e: any) {
+    toast(e.message || '读取友链失败', 'error')
+  }
 }
 
 function openDialog(row?: any) {
@@ -107,11 +112,10 @@ async function handleSave() {
   }
   saving.value = true
   try {
-    if (editing.value) {
-      await put(`/friend-link/${editId.value}`, dialogForm)
-    } else {
-      await post('/friend-link', dialogForm)
-    }
+    const res = editing.value
+      ? await put<any>(`/friend-link/${editId.value}`, dialogForm)
+      : await post<any>('/friend-link', dialogForm)
+    if (res.code !== 200) throw new Error(res.message || '保存失败')
     dialogVisible.value = false
     toast('保存成功', 'success')
     fetchList()
@@ -125,7 +129,8 @@ async function handleSave() {
 async function handleDelete(id: number) {
   if (!(await confirmDialog('确定删除这条友链？'))) return
   try {
-    await del(`/friend-link/${id}`)
+    const res = await del<any>(`/friend-link/${id}`)
+    if (res.code !== 200) throw new Error(res.message || '删除失败')
     toast('删除成功', 'success')
     fetchList()
   } catch (e: any) {

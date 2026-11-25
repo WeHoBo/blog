@@ -23,6 +23,12 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_FILES = [
   'components/ArticleCard.vue',
   'components/ArticleRow.vue',
+  // 详情页与阅读时长：2026-11-24 改版前这两处一直不在清单里，
+  // 改完跑 check-sfc 报「全部通过」其实压根没检查它们。加进来。
+  'components/ArticleDetail.vue',
+  'components/ReadingTime.vue',
+  'components/TableOfContents.vue',
+  'pages/archive.vue',
   'components/ScrollPane.vue',
   'components/FeaturedStack.vue',
   'components/ArticleEditor.vue',
@@ -38,6 +44,32 @@ const DEFAULT_FILES = [
   'composables/useCompanionState.ts',
   'composables/useCompanionDrag.ts',
   'components/Header.vue',
+  // 皮肤系统（2026-11-25）：三套首页版式 + 背景层 + 状态源
+  'composables/useSkin.ts',
+  'composables/useWallpaper.ts',
+  'components/WallpaperLayer.vue',
+  'components/WallpaperArtwork.vue',
+  'components/home/FeedMore.vue',
+  'composables/useHomeFeed.ts',
+  'components/AppConfirm.vue',
+  // 2026-11-24 codex 那轮新增：壁纸成品组件、后台背景预览、草稿与上传工具。
+  // 这几个之前没进清单，改完跑 check-sfc 会是「全部通过」但其实没检查。
+  'components/AdminBackgroundPreview.vue',
+  'pages/admin/background-preview.vue',
+  'utils/editorDraft.ts',
+  'utils/upload.ts',
+  'components/home/FilterResults.vue',
+  'components/home/SkinSidebar.vue',
+  'components/home/SkinMint.vue',
+  // 2026-11-24 第四轮（四套参考版式 + 缩略图选择器）。
+  // 这几个是 codex 新建的，之前不在清单里 → 跑 check-sfc 报「全部通过」其实没检查过。
+  'composables/useReferenceShell.ts',
+  'components/home/ReferenceEdition.vue',
+  'components/home/EditionCard.vue',
+  'components/ReferenceRail.vue',
+  'components/SkinThumbnail.vue',
+  'components/SkinWallpaper.vue',
+  'layouts/default.vue',
   'components/ApplyAuthorDialog.vue',
   'pages/author/index.vue',
   'pages/author/create.vue',

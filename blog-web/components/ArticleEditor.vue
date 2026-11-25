@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="writing-workspace">
     <div class="flex justify-between items-center mb-6 gap-3 flex-wrap">
       <div class="flex items-center gap-3">
         <h1 class="text-2xl font-bold">{{ articleId ? '编辑文章' : '写文章' }}</h1>
@@ -8,18 +8,32 @@
       <div class="flex gap-2 flex-wrap">
         <button v-if="!isAuthorMode" @click="openPreview" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 transition" title="在新窗口预览草稿">预览</button>
         <button v-if="articleId && !isAuthorMode" @click="goRevisions" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 transition">版本历史</button>
-        <button @click="save(0)" :disabled="saving" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 disabled:opacity-50 transition">
+        <button @click="save(0)" :disabled="!canSave" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 disabled:opacity-50 transition">
           {{ saving ? '保存中…' : (isAuthorMode ? '存草稿' : '保存草稿') }}
         </button>
-        <button @click="save(1)" :disabled="saving" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50 transition">
+        <button @click="save(1)" :disabled="!canSave" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50 transition">
           {{ saving ? '提交中…' : (isAuthorMode ? '提交审核' : '发布') }}
         </button>
       </div>
     </div>
 
-    <div v-if="loading" class="text-center py-10 text-gray-400">加载中...</div>
-    <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 sm:p-6 space-y-4">
-      <div class="flex flex-col lg:flex-row gap-4">
+    <div v-if="loadError" role="alert" class="p-5 rounded-lg border">
+      {{ loadError }} <button type="button" class="underline" @click="loadEditor">重试</button>
+    </div>
+    <div v-else-if="loading" class="text-center py-10 text-gray-400">加载中...</div>
+    <div v-else class="writing-sheet bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 sm:p-6 space-y-4">
+      <div v-for="entry in recoverable" :key="entry.key" class="text-sm p-3 rounded border flex flex-wrap items-center gap-3">
+        <span>本地草稿 · {{ entry.draft.fields.title || '无标题' }} · {{ new Date(entry.draft.updatedAt).toLocaleString() }}</span>
+        <span v-if="serverVersion && entry.draft.editVersion && entry.draft.editVersion !== serverVersion">服务器已有更新，恢复后请核对内容。</span>
+        <button class="underline" @click="restoreCopy(entry)">恢复</button>
+        <button class="underline" @click="discardCopy(entry)">放弃副本</button>
+      </div>
+      <div v-if="versionConflict" role="alert" class="text-sm p-3 rounded border">
+        服务器版本已更新，自动保存已暂停。重新载入后可以对照并恢复本地草稿。
+        <button class="underline" @click="reloadAfterConflict">重新载入</button>
+      </div>
+      <p v-if="metadataError" role="status" class="text-sm text-amber-700">{{ metadataError }} <button class="underline" @click="loadMetadata">重试</button></p>
+      <div class="writing-title flex flex-col lg:flex-row gap-4">
         <input v-model="form.title" placeholder="文章标题" aria-label="文章标题" class="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-lg" />
         <div class="flex gap-2 items-center">
           <select v-model="form.categoryId" aria-label="文章分类" class="px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600">
@@ -30,7 +44,9 @@
         </div>
       </div>
 
-      <div class="flex flex-col lg:flex-row gap-4">
+      <div class="writing-metadata space-y-4">
+      <h2 v-if="reference" class="text-sm font-bold">文章设置</h2>
+      <div class="writing-options flex flex-col lg:flex-row gap-4">
         <div class="flex-1">
           <input v-model="form.slug" placeholder="自定义URL(可选)" aria-label="自定义 URL" class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" @blur="checkSlug" @input="slugState = 'idle'" />
           <p class="mt-1 text-xs" :class="slugHint.cls">{{ slugHint.text }}</p>
@@ -48,12 +64,9 @@
         <label v-if="!isAuthorMode" class="flex items-center gap-1 text-xs text-gray-500 lg:border lg:rounded-lg lg:px-3 lg:py-2 dark:border-gray-600">
           <input type="checkbox" v-model="form.isTop" :true-value="1" :false-value="0" class="mr-1" /> 置顶
         </label>
-        <!-- 精品：只有超管能设。它只是卡片上的一个质量徽标，**不决定首页布局**
-             （首页中间那栏由「置顶」驱动）。
-             后端 ArticleService#gateFeatured 会再判一次角色，这里只是不给入口。 -->
         <label v-if="isSuper"
           class="flex items-center gap-1 text-xs text-gray-500 lg:border lg:rounded-lg lg:px-3 lg:py-2 dark:border-gray-600"
-          title="精品只是一枚质量徽标，不改变首页布局">
+          title="添加精品标记，并收录到首页精选文章">
           <input type="checkbox" v-model="form.isFeatured" :true-value="1" :false-value="0" class="mr-1" /> 设为精品
         </label>
       </div>
@@ -71,13 +84,13 @@
             <input type="checkbox" :value="t.id" v-model="form.tagIds" class="hidden" />
             {{ t.name }}
           </label>
-          <span v-if="tags.length === 0" class="text-xs text-gray-400">暂无标签，可在此直接新建</span>
+          <span v-if="tags.length === 0 && !metadataError" class="text-xs text-gray-400">暂无标签</span>
         </div>
       </div>
 
       <input v-model="form.summary" placeholder="文章摘要（可选，留空发布时自动取正文前 120 字）" aria-label="文章摘要" class="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
 
-      <div>
+      <div class="writing-cover">
         <label class="text-sm text-gray-500 mb-1 block">封面图</label>
         <div class="flex gap-2">
           <input v-model="form.cover" placeholder="封面图URL" class="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 text-sm" />
@@ -90,7 +103,8 @@
         <img v-if="form.cover" :src="ossImage(form.cover, { w: IMG_W.card })" alt="封面预览" class="mt-2 h-32 rounded-lg object-cover" />
       </div>
 
-      <div>
+      </div>
+      <div class="writing-main">
         <div class="flex items-center justify-between mb-1">
           <label class="text-sm text-gray-500">内容（Markdown）</label>
           <div class="flex items-center gap-2 text-xs text-gray-400">
@@ -163,7 +177,7 @@
           </div>
 
           <div class="grid" :class="layoutClass" ref="editorGrid">
-            <div v-if="layoutMode !== 'preview'" class="relative min-h-[300px]" :style="{ height: editorHeight + 'px' }">
+            <div v-show="layoutMode !== 'preview'" class="relative min-h-[300px]" :style="{ height: editorHeight + 'px' }">
               <div ref="cmHost" class="absolute inset-0 cm-editor-host"></div>
             </div>
             <div v-if="layoutMode !== 'edit'" ref="previewEl" @scroll.passive="onPreviewScroll" class="min-h-[300px] overflow-y-auto px-4 py-3 bg-gray-50 dark:bg-gray-700/50" :style="{ height: editorHeight + 'px' }">
@@ -189,6 +203,7 @@ import { markdown } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
+import { draftPrefix, readDrafts, type DraftFields, type LocalArticleDraft } from '~/utils/editorDraft'
 
 const props = defineProps<{
   articleId?: string | number
@@ -212,12 +227,25 @@ const { toast, confirmDialog } = useFeedback()
 const { upload, uploadWithProgress, compressImage } = useUpload()
 const purgeCache = usePurgeCache()
 const router = useRouter()
+const { reference } = useReferenceShell()
+const auth = useAuthStore()
+const createdId = ref<string>()
+const articleId = computed(() => createdId.value || props.articleId)
 /** 「设为精品」勾选框只对超管渲染（mounted 后才置 true，避免 SSR 水合不一致） */
 const isSuper = useIsSuper()
 
 const categories = ref<any[]>([])
 const tags = ref<any[]>([])
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref('')
+const metadataError = ref('')
+const lastAutosaveAt = ref('')
+const versionConflict = ref(false)
+const canSave = computed(() => !loading.value && !loadError.value && !saving.value && !versionConflict.value)
+let serverVersion: string | undefined
+let mounted = false
+let manualSaveRequired = false
+let initialized = false
 const saving = ref(false)
 const coverUploading = ref(false)
 const uploading = ref(false)
@@ -244,6 +272,10 @@ let autosaveTimer: any = null
  * 用普通变量时 computed 读不到变化，那个提示永远不会出现。
  */
 const dirty = ref(false)
+const recoverable = ref<ReturnType<typeof readDrafts>>([])
+let draftKey = ''
+let draftTimer: ReturnType<typeof setTimeout> | undefined
+let storageWarning = false
 /**
  * 编辑版本号：每次表单变更 +1。
  *
@@ -292,7 +324,7 @@ const saveState = computed(() => {
   if (saving.value) return { text: '保存中…', cls: 'text-gray-400' }
   if (slugState.value === 'taken') return { text: 'URL 已被占用', cls: 'text-red-500' }
   if (dirty.value) return { text: '未保存', cls: 'text-amber-500' }
-  if (autosaveTimer) return { text: '已自动保存', cls: 'text-green-500' }
+  if (lastAutosaveAt.value) return { text: '已自动保存 ' + lastAutosaveAt.value, cls: 'text-green-500' }
   return { text: '', cls: '' }
 })
 
@@ -321,17 +353,21 @@ const readMinutes = computed(() => {
 // ============ 分类 / 标签 ============
 
 async function fetchCategories() {
-  try {
-    const res = await get<any>('/category/list')
-    if (res.code === 200) categories.value = res.data || []
-  } catch (e: any) {
-    console.error('获取分类失败:', e.message)
-  }
+  const res = await get<any>('/category/list')
+  if (res.code !== 200) throw new Error('分类加载失败')
+  categories.value = res.data || []
 }
 
 async function fetchTags() {
   const res = await get<any>('/tag/list')
-  if (res.code === 200) tags.value = res.data || []
+  if (res.code !== 200) throw new Error('标签加载失败')
+  tags.value = res.data || []
+}
+
+async function loadMetadata() {
+  const results = await Promise.allSettled([fetchCategories(), fetchTags()])
+  const missing = ['分类', '标签'].filter((_, i) => results[i].status === 'rejected')
+  metadataError.value = missing.length ? missing.join('、') + '读取失败，已选项会保留。' : ''
 }
 
 async function quickCreateCategory() {
@@ -375,7 +411,7 @@ async function checkSlug() {
   }
   slugState.value = 'checking'
   try {
-    const excludeId = props.articleId ? Number(props.articleId) : undefined
+    const excludeId = articleId.value ? Number(articleId.value) : undefined
     const qs = excludeId ? `?slug=${encodeURIComponent(slug)}&excludeId=${excludeId}` : `?slug=${encodeURIComponent(slug)}`
     // 作者走自己的平行入口：后台那个 slug-available 是 hasRole('admin')，作者打过去必然 403
     const url = isAuthorMode.value
@@ -720,6 +756,7 @@ function onDrop(e: DragEvent) {
  */
 function authorPayload() {
   return {
+    editVersion: serverVersion,
     title: form.title,
     summary: form.summary,
     cover: form.cover,
@@ -752,25 +789,19 @@ async function saveAuthor(submit: boolean) {
     // 提交审核失败（标题为空被拒、URL 冲突、稿件被驳回后锁定…）也会弹
     // 「已提交审核，站长通过后就会上线」，作者以为交上去了，站长的待审列表里根本没有。
     // 2026-11-23 修。
-    const res: any = props.articleId
-      ? await put(`/author/articles/${props.articleId}${qs}`, authorPayload())
+    const res: any = articleId.value
+      ? await put(`/author/articles/${articleId.value}${qs}`, authorPayload())
       : await post<any>(`/author/articles${qs}`, authorPayload())
     if (res?.code !== 200) {
+      if (res?.code === 409) {
+        versionConflict.value = true
+        persistDraft()
+      }
       toast(res?.message || '保存失败，内容还在编辑器里，请重试', 'error')
       return
     }
-    if (!props.articleId && res.data?.id) {
-      ;(props as any).articleId = res.data.id
-      await router.replace(`/author/${res.data.id}`)
-    }
-    // 作者模式没有自动保存，所以这里不重排定时器；但同样不能把等待期间的
-    // 新输入标成「已保存」—— 否则作者以为发出去的是最后那一版，实际少了几句
-    if (editVersion === versionAtSave) dirty.value = false
-    toast(submit ? '已提交审核，站长通过后就会上线' : '草稿已保存', 'success')
-    if (submit) {
-      // 停留一下让提示看得见，再回列表
-      setTimeout(() => router.push('/author'), 900)
-    }
+    await completeSave(res.data, versionAtSave, submit ? '/author' : '', false)
+    toast(submit ? '已提交审核' : '草稿已保存', 'success')
   } catch (e: any) {
     toast(e.message || '保存失败', 'error')
   } finally {
@@ -780,6 +811,7 @@ async function saveAuthor(submit: boolean) {
 
 function buildPayload(status: number) {
   const payload: Record<string, any> = {
+    editVersion: serverVersion,
     title: form.title,
     summary: form.summary,
     cover: form.cover,
@@ -825,7 +857,7 @@ function autoSummary() {
 }
 
 async function save(status: number, autosave = false) {
-  if (saving.value) return
+  if (!canSave.value) return
   // 作者模式完全走另一条路：没有"发布"，只有存草稿 / 提交审核
   if (isAuthorMode.value) {
     if (autosave) return
@@ -857,10 +889,14 @@ async function save(status: number, autosave = false) {
     // 标题为空、无权限…），useApi 不抛错。这里以前 PUT 的返回值根本没接，
     // 然后无条件 dirty=false + 弹「已保存」—— 用户以为存下了，实际一个字没落库，
     // 而且未保存标记被清掉，他再也不会收到提醒。2026-11-23 修。
-    const res: any = props.articleId
-      ? await put(`/article/${props.articleId}?autosave=${autosave}`, buildPayload(status))
+    const res: any = articleId.value
+      ? await put(`/article/${articleId.value}?autosave=${autosave}`, buildPayload(status))
       : await post('/article', buildPayload(status))
     if (res?.code !== 200) {
+      if (res?.code === 409) {
+        versionConflict.value = true
+        persistDraft()
+      }
       if (!autosave) {
         toast(res?.message || '保存失败，内容还在编辑器里，请重试', 'error')
       } else if (!autosaveFailed) {
@@ -871,31 +907,10 @@ async function save(status: number, autosave = false) {
       return
     }
     autosaveFailed = false
-    if (!props.articleId && res.data?.id) {
-      // 新建成功后拿到 id，之后的自动保存都走更新
-      ;(props as any).articleId = res.data.id
-      await router.replace(`/admin/articles/${res.data.id}`)
-    }
-    // 同步当前状态：否则「草稿 → 点发布 → 继续改一个字」时，
-    // 5 秒后的自动保存还会带着旧状态 0，把刚发布的文章又打回草稿
-    form.status = status
-    if (editVersion === versionAtSave) {
-      dirty.value = false
-    } else {
-      // 等待期间又有输入：这些字还没落库，不能标成已保存。
-      // 保持 dirty 并重新排一次自动保存，否则要等用户下次动手才会存下去
-      scheduleAutosave()
-    }
-    if (!autosave) {
-      // 发布/更新后立刻清页面缓存：首页缓 20s、详情页缓 10s，
-      // 不清的话「发完文章回首页看不到」会持续十几秒。
-      if (status === 1) await purgeCache()
-      toast(status === 1 ? '发布成功' : '已保存', 'success')
-      if (status === 1) {
-        // 发布成功后短暂停留再回列表
-        setTimeout(() => router.push('/admin/articles'), 800)
-      }
-    }
+    form.status = res.data?.status ?? status
+    await completeSave(res.data, versionAtSave, !autosave && status === 1 ? '/admin/articles' : '', !autosave && status === 1)
+    if (!autosave) toast(form.status === 1 ? '发布成功' : '已保存', 'success')
+    else if (!dirty.value) lastAutosaveAt.value = new Date().toLocaleTimeString()
   } catch (e: any) {
     toast(e.message || '保存失败', 'error')
   } finally {
@@ -903,43 +918,123 @@ async function save(status: number, autosave = false) {
   }
 }
 
+/** 请求过程中的新输入必须继续留在编辑器。 */
+async function completeSave(article: any, savedVersion: number, destination: string, purge: boolean) {
+  const wasNew = !articleId.value
+  if (wasNew && !article?.id) throw new Error('服务器未返回文章编号，请查看文章列表')
+  if (wasNew) createdId.value = String(article.id)
+  serverVersion = article?.editVersion
+  manualSaveRequired = false
+  if (purge) await purgeCache()
+  if (!mounted) return
+  if (savedVersion !== editVersion) {
+    persistDraft()
+    scheduleAutosave()
+    toast('提交期间还有新修改，已保留在编辑器中', 'info')
+    return
+  }
+  dirty.value = false
+  removeLocal(draftKey)
+  if (destination) await router.push(destination)
+  else if (!props.articleId) await router.replace(editorPath(articleId.value!))
+}
+
+function editorPath(id: string | number) {
+  return isAuthorMode.value ? `/author/${id}` : `/admin/articles/${id}`
+}
+
+function storagePrefix(id?: string | number) {
+  if (!auth.user?.userId) return ''
+  return draftPrefix(auth.user.userId, props.mode || 'admin', id)
+}
+
+function newDraftKey(prefix: string) {
+  return prefix + (globalThis.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)))
+}
+
+function showStorageWarning() {
+  if (storageWarning) return
+  storageWarning = true
+  toast('此浏览器无法保存本地副本，离开前请手动保存文章', 'error')
+}
+
+function removeLocal(key: string) {
+  if (!key) return
+  try { localStorage.removeItem(key) } catch { showStorageWarning() }
+}
+
+function persistDraft() {
+  clearTimeout(draftTimer)
+  if (!initialized || !dirty.value || !draftKey) return false
+  const { status, ...fields } = form
+  const draft: LocalArticleDraft = { fields, updatedAt: Date.now(), editVersion: serverVersion,
+    articleId: articleId.value ? String(articleId.value) : undefined }
+  try {
+    localStorage.setItem(draftKey, JSON.stringify(draft))
+    return true
+  } catch { showStorageWarning(); return false }
+}
+
+type DraftEntry = ReturnType<typeof readDrafts>[number]
+
+function forgetEntry(key: string) {
+  recoverable.value = recoverable.value.filter(entry => entry.key !== key)
+}
+
+async function discardCopy(entry: DraftEntry) {
+  if (!(await confirmDialog('放弃这份本地草稿？', '放弃本地草稿', true))) return
+  removeLocal(entry.key)
+  forgetEntry(entry.key)
+}
+
+async function restoreCopy(entry: DraftEntry) {
+  if (dirty.value && !(await confirmDialog('用这份本地草稿替换当前编辑内容？'))) return
+  if (!articleId.value && entry.draft.articleId) {
+    const prefix = storagePrefix(entry.draft.articleId)
+    if (!prefix) return
+    try { localStorage.setItem(newDraftKey(prefix), JSON.stringify(entry.draft)) }
+    catch { showStorageWarning(); return }
+    removeLocal(entry.key)
+    forgetEntry(entry.key)
+    await router.push(editorPath(entry.draft.articleId))
+    return
+  }
+  // 恢复的副本可能基于旧版本，等待作者确认后再写回服务器。
+  manualSaveRequired = true
+  clearTimeout(autosaveTimer)
+  const fields = entry.draft.fields
+  for (const key of Object.keys(form) as (keyof DraftFields | 'status')[]) {
+    if (key !== 'status') Object.assign(form, { [key]: fields[key] })
+  }
+  if (cmView && cmView.state.doc.toString() !== fields.contentMd) {
+    cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: fields.contentMd } })
+  }
+  markDirty()
+  if (persistDraft()) {
+    removeLocal(entry.key)
+    forgetEntry(entry.key)
+  }
+  toast('已恢复本地草稿，确认内容后请手动保存', 'info')
+}
+
 function markDirty() {
+  if (!initialized) return
+  lastAutosaveAt.value = ''
   editVersion++
   dirty.value = true
+  clearTimeout(draftTimer)
+  draftTimer = setTimeout(persistDraft, 350)
   scheduleAutosave()
 }
 
-/**
- * 表单快照：用来区分「用户改动」和「程序赋值」。
- *
- * 以前只有正文（CodeMirror 的 updateListener）会调 markDirty，于是改标题、摘要、
- * 分类、标签、封面、发布时间全都不算改动 —— 不触发自动保存、顶部不显示「未保存」、
- * 关页面也不弹拦截。用户改完标题直接切走，那行字就没了。
- * 现在整份表单共用这一套追踪。
- *
- * 用快照比对而不是一个「已加载」布尔：加载文章时那一串 form.xxx = ... 也会触发
- * watch，靠快照相等才不会被误判成用户改动（布尔标志会被 nextTick 的时序坑到）。
- */
-let lastFormJson = ''
-/**
- * 表单指纹。跳过正文：正文有 CodeMirror 的 updateListener 单独负责 markDirty，
- * 而且一篇几万字的稿子每敲一个键就全量序列化一遍不值得。
- */
-function formFingerprint(): string {
-  return JSON.stringify(form, (k, v) => (k === 'contentMd' ? undefined : v))
-}
-watch(form, () => {
-  const now = formFingerprint()
-  if (now === lastFormJson) return
-  lastFormJson = now
-  markDirty()
-}, { deep: true })
+watch(() => [form.title, form.summary, form.cover, form.categoryId, [...form.tagIds],
+  form.isTop, form.isFeatured, form.series, form.slug, form.publishAt], markDirty, { flush: 'sync' })
 
 function scheduleAutosave() {
-  if (!props.articleId) return // 新建尚未拿到 id，不自动保存
+  if (!articleId.value) return // 新建尚未拿到 id，不自动保存
   // 作者模式不做自动保存：一次静默的 PUT 可能把「已发布」的文章又写一遍，
   // 而作者最需要的是"我点了什么就发生什么"，别在背后改线上内容
-  if (isAuthorMode.value) return
+  if (isAuthorMode.value || versionConflict.value || manualSaveRequired) return
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = setTimeout(async () => {
     autosaveTimer = null
@@ -969,23 +1064,24 @@ function onFullscreenChange() {
 
 function openPreview() {
   // 草稿预览：新窗口打开（admin 能绕过 status 限制读取草稿）
-  if (props.articleId && form.slug) {
+  if (articleId.value && form.slug) {
     window.open(`/post/${form.slug}`, '_blank')
-  } else if (props.articleId) {
-    window.open(`/article/${props.articleId}`, '_blank')
+  } else if (articleId.value) {
+    window.open(`/article/${articleId.value}`, '_blank')
   } else {
     toast('请先保存草稿，再预览', 'info')
   }
 }
 
 function goRevisions() {
-  if (props.articleId) router.push(`/admin/articles/revisions/${props.articleId}`)
+  if (articleId.value) router.push(`/admin/articles/revisions/${articleId.value}`)
 }
 
 // ============ 未保存拦截 ============
 
 function onBeforeUnload(e: BeforeUnloadEvent) {
   if (dirty.value) {
+    persistDraft()
     e.preventDefault()
     e.returnValue = ''
   }
@@ -994,56 +1090,94 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 // ============ 数据加载 ============
 
 async function fetchArticle() {
-  if (!props.articleId) return
-  try {
-    // 作者必须走 /author/articles/{id}：公开的 /article/{id} 只返回已发布的文章，
-    // 作者编辑自己的草稿时会 404，看起来像"文章丢了"
-    const url = isAuthorMode.value
-      ? `/author/articles/${props.articleId}`
-      : `/article/${props.articleId}`
-    const res = await get<any>(url)
-    if (res.code === 200 && res.data) {
-      const a = res.data.article || res.data
-      form.title = a.title || ''
-      form.summary = a.summary || ''
-      form.cover = a.cover || ''
-      form.contentMd = a.contentMd || ''
-      form.categoryId = a.categoryId ?? null
-      form.tagIds = (res.data.tags || []).map((t: any) => t.id)
-      form.isTop = a.isTop ?? 0
-      form.isFeatured = a.isFeatured ?? 0
-      form.series = a.series || ''
-      form.slug = a.slug || ''
-      // 老文章的 publish_at 是 NULL（旧逻辑发布时会清空），这里回落到 create_time：
-      // 既不留下空值（发布时间必填），也保证「编辑一下老文章」不会把它的发布日期改成今天
-      // ——否则热力图上那篇文章会凭空跳到今天。
-      form.publishAt = (a.publishAt || a.createTime || '').replace(' ', 'T').slice(0, 16)
-      form.status = a.status ?? 0
-    }
-  } catch (e: any) {
-    toast('加载文章失败: ' + (e.message || '未知错误'), 'error')
-  }
+  if (!articleId.value) return
+  // 作者必须走 /author/articles/{id}：公开的 /article/{id} 只返回已发布的文章，
+  // 作者编辑自己的草稿时会 404，看起来像"文章丢了"
+  const url = isAuthorMode.value
+    ? `/author/articles/${articleId.value}`
+    : `/article/${articleId.value}`
+  const res = await get<any>(url)
+  if (res.code !== 200 || !res.data) throw new Error(res.message || '文章读取失败')
+  const a = res.data.article || res.data
+  form.title = a.title || ''
+  form.summary = a.summary || ''
+  form.cover = a.cover || ''
+  form.contentMd = a.contentMd || ''
+  form.categoryId = a.categoryId ?? null
+  form.tagIds = (res.data.tags || []).map((t: any) => t.id)
+  form.isTop = a.isTop ?? 0
+  form.isFeatured = a.isFeatured ?? 0
+  form.series = a.series || ''
+  form.slug = a.slug || ''
+  // 老文章的 publish_at 是 NULL（旧逻辑发布时会清空），这里回落到 create_time：
+  // 既不留下空值（发布时间必填），也保证「编辑一下老文章」不会把它的发布日期改成今天
+  // ——否则热力图上那篇文章会凭空跳到今天。
+  form.publishAt = (a.publishAt || a.createTime || '').replace(' ', 'T').slice(0, 16)
+  form.status = a.status ?? 0
+  serverVersion = a.editVersion
 }
 
 // ============ 生命周期 ============
 
-onMounted(async () => {
+async function loadEditor() {
+  initialized = false
   loading.value = true
-  await Promise.all([fetchArticle(), fetchCategories(), fetchTags()])
-  loading.value = false
-  nextTick(() => {
+  loadError.value = ''
+  try {
+    await fetchArticle()
+    if (!mounted) return
+    const prefix = storagePrefix(props.articleId)
+    if (prefix) {
+      draftKey = newDraftKey(prefix)
+      try { recoverable.value = readDrafts(localStorage, prefix) }
+      catch { showStorageWarning() }
+    }
+    dirty.value = false
+    versionConflict.value = false
+    loading.value = false
+    await nextTick()
+    if (!mounted) return
     initEditor()
-    // 初始化完成后打一个快照：此刻之前的所有赋值都是"加载"，不是"用户改动"
-    lastFormJson = formFingerprint()
-  })
+    initialized = true
+  } catch (e: any) {
+    loadError.value = e.message || '文章读取失败'
+    loading.value = false
+  }
+}
+
+function reloadAfterConflict() {
+  if (!persistDraft()) return
+  destroyEditor()
+  void loadEditor()
+}
+
+async function allowLeave() {
+  if (!dirty.value) return true
+  persistDraft()
+  if (saving.value) { toast('正在保存，请稍候再离开', 'info'); return false }
+  return await confirmDialog('内容尚未保存到服务器，仍要离开编辑页吗？', '离开编辑器')
+}
+onBeforeRouteLeave(allowLeave)
+onBeforeRouteUpdate((to, from) => to.path === from.path || allowLeave())
+
+onMounted(() => {
+  mounted = true
+  void loadEditor()
+  void loadMetadata()
   window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('pagehide', persistDraft)
   document.addEventListener('fullscreenchange', onFullscreenChange)
 })
 
 onBeforeUnmount(() => {
+  mounted = false
+  persistDraft()
+  initialized = false
   window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('pagehide', persistDraft)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
-  if (autosaveTimer) clearTimeout(autosaveTimer)
+  clearTimeout(draftTimer)
+  clearTimeout(autosaveTimer)
   destroyEditor()
 })
 </script>

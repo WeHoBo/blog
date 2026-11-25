@@ -7,7 +7,7 @@
       状态存 localStorage，下次打开还是收起（只在 lg 以上出现，移动端本来就没有目录）。
     -->
     <aside v-if="hasToc && !tocCollapsed" class="hidden lg:block w-56 flex-shrink-0">
-      <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
+      <div data-toc-scroll class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
         <TableOfContents :content="article.contentMd || ''" collapsible @collapse="toggleToc" />
       </div>
     </aside>
@@ -25,42 +25,95 @@
     <main class="flex-1 min-w-0">
       <article class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
         <!--
-          头部版式：左侧「标题 + 元信息」，右侧「约方形封面缩略图」。
-          以前封面是正文上方的通栏大图（w-full max-h-96）：又长又扁，把标题和正文硬生生隔开，
-          和左侧密集的文字信息在视觉上也不协调。现在收成方形缩略图贴到标题右侧，左右两栏对齐。
+          头部版式（第二轮改）：单列 —— 标题 → 元信息 → 导语 → 封面。
+          上一版把封面收成 128px 方块贴在标题右侧：标题确实没被挤下去，代价是
+          图解类文章（拓扑图、架构图、带标签的界面截图）缩到 128px 后，箭头和
+          注释全糊成一团 —— 而封面存在的唯一理由就是让人一眼看懂这篇在讲什么。
+          现在改成：先让标题和元信息独占整行（读者第一眼落在字上），
+          导语之后再把封面按原比例摊开，宽度等于正文阅读栏（44rem，与正文左边缘对齐）。
+          竖图用 object-contain + 70vh 兜住，否则一张手机长截图会把正文顶到几屏之外。
         -->
         <div class="px-6 sm:px-10 pt-8 pb-6 border-b dark:border-gray-700">
-          <div class="flex items-start gap-4 sm:gap-6">
-            <!-- 左：标题 + 标题下方的全部元信息 -->
-            <div class="flex-1 min-w-0">
-              <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 leading-tight mb-4">
-                {{ article.title }}
-              </h1>
-              <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-400">
-                <span>{{ article.createTime?.substring(0, 10) }}</span>
-                <span v-if="author" class="flex items-center gap-1">
-                  <img v-if="author.avatar" :src="ossImage(author.avatar, { w: IMG_W.avatar })" alt="" loading="lazy" decoding="async" class="w-5 h-5 rounded-full object-cover" />
-                  <span>{{ author.nickname || author.username }}</span>
-                </span>
-                <span>👁 {{ viewCountLive }} 阅读</span>
-                <span>📝 {{ wordCount }} 字</span>
-                <ReadingTime :content="article.contentMd || ''" />
-                <span>💬 {{ commentTotal || article.commentCount || 0 }} 评论</span>
-                <button v-if="authStore.isLoggedIn" @click="aiSummarize"
-                  class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-primary-600 text-white hover:bg-primary-700 transition"
-                  :disabled="aiSummaryLoading">
-                  <svg v-if="aiSummaryLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
-                  <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
-                  {{ aiSummaryLoading ? '总结中...' : 'AI 总结' }}
-                </button>
-              </div>
-            </div>
+          <!-- 系列位置：标题上方一行小字。
+               读者从搜索或首页系列入口进来时，第一件想知道的是「这是第几篇、还剩几篇」，
+               放在标题上方比塞进下面那排元信息里更容易被看见。 -->
+          <div v-if="seriesInfo" class="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span class="font-medium theme-text">{{ seriesInfo.name }}</span>
+            <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
+            <span class="text-gray-500 dark:text-gray-400">第 {{ seriesInfo.index }} 篇 / 共 {{ seriesInfo.count }} 篇</span>
+          </div>
 
-            <!-- 右：约方形封面缩略图（不再撑满整行，和左侧信息同高起步） -->
-            <div v-if="article.cover"
-              class="flex-shrink-0 w-20 h-20 sm:w-28 sm:h-28 lg:w-32 lg:h-32 rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-700 ring-1 ring-black/5 dark:ring-white/10 shadow-sm">
-              <img :src="ossImage(article.cover, { w: IMG_W.thumb })" :alt="article.title" loading="lazy" decoding="async" class="w-full h-full object-cover" />
+          <!-- 衬线标题由 layouts/default.vue 的 .editorial 祖先统一提供，这里不用再加。
+               限宽 44rem 与正文同宽：标题铺满整张卡会在大屏上一行 60 多个汉字，
+               读者读完标题就找不到下一行了。标题、导语、封面、正文四条左边缘对齐。 -->
+          <h1 class="max-w-[44rem] text-[1.75rem] sm:text-4xl font-bold text-gray-900 dark:text-gray-100 leading-[1.28] mb-4">
+            {{ article.title }}
+          </h1>
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-400">
+            <!-- 日期口径与列表卡一致：优先发布时间，没有才退回创建时间。
+                 原来这里只读 createTime，定时发布/改过发布时间的文章会出现
+                 「列表写 11-20、点进来写 11-18」。 -->
+            <span>{{ shownDate }}</span>
+            <span v-if="author" class="flex items-center gap-1">
+              <img v-if="author.avatar" :src="ossImage(author.avatar, { w: IMG_W.avatar })" alt="" loading="lazy" decoding="async" class="w-5 h-5 rounded-full object-cover" />
+              <span>{{ author.nickname || author.username }}</span>
+            </span>
+            <!-- 三个计数原来是 👁 / 📝 / 💬 三个 emoji：不同系统字形粗细不一，
+                 和旁边 14px 的灰色小字不是一套视觉语言。统一换成内联线条图标。 -->
+            <span class="inline-flex items-center gap-1">
+              <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.6 10-6.6S22 12 22 12s-3.6 6.6-10 6.6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.6"/></svg>
+              {{ viewCountLive }} 阅读
+            </span>
+            <span class="inline-flex items-center gap-1">
+              <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h7L18.5 8v12a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5Z"/><path d="M14 3.5V8h4.5"/></svg>
+              {{ wordCount }} 字
+            </span>
+            <ReadingTime :content="article.contentMd || ''" />
+            <span class="inline-flex items-center gap-1">
+              <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.6a7.6 7.6 0 0 1-11.1 6.8L4 20l1.6-3.7A7.6 7.6 0 1 1 21 11.6Z"/></svg>
+              {{ commentTotal || article.commentCount || 0 }} 评论
+            </span>
+            <button v-if="authStore.isLoggedIn" @click="aiSummarize"
+              class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-primary-600 text-white hover:bg-primary-700 transition"
+              :disabled="aiSummaryLoading">
+              <svg v-if="aiSummaryLoading" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+              <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8V4m0 0l-2 2m2-2l2 2"/></svg>
+              {{ aiSummaryLoading ? '总结中...' : 'AI 总结' }}
+            </button>
+          </div>
+
+          <!-- 导语：有摘要才显示。摘要本来只在列表卡上露一行，进到详情页反而消失，
+               读者点进来得从正文第一句重新找「这篇到底讲什么」。
+               ⚠️ 但很多文章的摘要是直接从正文第一段截的，那样会在标题下原样重复两遍，
+               所以由 showSummary 判一次：摘要就是正文开头时不显示。 -->
+          <p v-if="showSummary"
+            class="mt-5 max-w-[44rem] text-[0.95rem] leading-[1.75] text-gray-500 dark:text-gray-400">
+            {{ article.summary }}
+          </p>
+
+          <!-- 手机端目录：折叠面板紧跟在导语后面。
+               桌面有左侧固定目录（lg 以上才渲染），手机上原来完全没有入口 ——
+               读长文想跳到「常见问题」只能一路滑。用原生 <details> 而不是自己写状态：
+               浏览器自带展开/收起与无障碍语义，也不需要额外 JS。 -->
+          <details v-if="mobileTocCount >= 3" @toggle="onMobileTocToggle" class="lg:hidden mt-6 max-w-[44rem] rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70 overflow-hidden">
+            <summary class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden text-sm font-medium text-gray-800 dark:text-gray-200">
+              <span class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+                本文目录
+                <span class="text-xs font-normal text-gray-400">{{ mobileTocCount }} 节</span>
+              </span>
+              <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="px-2 pb-3 pt-1 border-t border-gray-200/70 dark:border-gray-700/70">
+              <TableOfContents :content="article.contentMd || ''" hide-title :expanded="mobileTocOpen" />
             </div>
+          </details>
+
+          <!-- 封面：按原比例，宽度对齐正文阅读栏 -->
+          <div v-if="article.cover"
+            class="mt-6 max-w-[44rem] overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-700 ring-1 ring-black/5 dark:ring-white/10">
+            <img :src="ossImage(article.cover, { w: IMG_W.content })" :alt="article.title" loading="lazy" decoding="async"
+              class="w-full h-auto max-h-[70vh] object-contain" />
           </div>
         </div>
 
@@ -77,6 +130,23 @@
               # {{ t.name }}
             </NuxtLink>
           </div>
+        </div>
+
+        <!-- 系列下一篇：文末最后一块。通用「上下篇」是按全站时间线排的，
+             系列读者要的是「这个连载的下一回」，两者的顺序经常不一样。 -->
+        <div v-if="seriesInfo?.next" class="px-6 sm:px-10 pb-8">
+          <NuxtLink :to="articlePath(seriesInfo.next)"
+            class="group block max-w-[44rem] rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 p-5 hover:border-primary-400 dark:hover:border-primary-600 hover:bg-primary-50/40 dark:hover:bg-primary-900/10 transition">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0">
+                <div class="text-[11px] font-medium theme-text mb-1.5">系列下一篇 · {{ seriesInfo.name }}</div>
+                <div class="font-bold text-gray-900 dark:text-gray-100 leading-snug group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors">
+                  {{ seriesInfo.next.title }}
+                </div>
+              </div>
+              <svg class="w-5 h-5 flex-shrink-0 mt-1 text-gray-400 group-hover:text-primary-600 dark:group-hover:text-primary-400 group-hover:translate-x-0.5 transition" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </div>
+          </NuxtLink>
         </div>
       </article>
 
@@ -279,6 +349,31 @@ const tags = computed<any[]>(() => props.tags || [])
 const author = computed<any>(() => props.author || null)
 const wordCount = computed(() => props.article?.wordCount || 0)
 
+/** 日期口径与列表卡对齐：优先发布时间，没有才退回创建时间 */
+const shownDate = computed(() => {
+  const d = props.article?.publishAt || props.article?.createTime || ''
+  return String(d).substring(0, 10)
+})
+
+/**
+ * 标题下的导语要不要显示。
+ *
+ * 很多文章（尤其是从别处搬过来的）summary 就是正文第一段的截断，
+ * 直接显示会出现「标题 → 一模一样的摘要 → 正文里又是这一段」。
+ * 这里把两边都去掉 markdown 标记和空白后比前 60 个字符：
+ * 摘要落在正文开头就当重复，不显示。60 个字足够判重，也不会因为
+ * 摘要比开头多一句就误判掉。
+ */
+const showSummary = computed(() => {
+  const summary = String(props.article?.summary || '').trim()
+  if (!summary) return false
+  const strip = (s: string) => s.replace(/[#*`>\-\s]/g, '')
+  const flatSummary = strip(summary)
+  const flatBody = strip(String(props.article?.contentMd || ''))
+  if (!flatSummary || !flatBody) return true
+  return !flatBody.startsWith(flatSummary.slice(0, 60))
+})
+
 /**
  * 目录折叠（借鉴 DeepSeek 的「收起边栏」）。
  * 状态存 localStorage，默认展开 —— 老读者升级后不该突然找不到目录。
@@ -286,8 +381,16 @@ const wordCount = computed(() => props.article?.wordCount || 0)
  */
 const TOC_COLLAPSED_KEY = 'toc_collapsed'
 const tocCollapsed = ref(false)
-/** 用和 TableOfContents 同一套 extractHeadings 判断有没有目录，避免空列占位 */
-const hasToc = computed(() => extractHeadings(props.article?.contentMd || '').length > 0)
+const mobileTocOpen = ref(false)
+function onMobileTocToggle(event: Event) {
+  mobileTocOpen.value = (event.currentTarget as HTMLDetailsElement).open
+}
+/** 用和 TableOfContents 同一套 extractHeadings 判断有没有目录，避免空列占位。
+ *  解析一次缓存成 computed，hasToc 与手机端的节数判断共用，别各算一遍。 */
+const tocHeadings = computed<any[]>(() => extractHeadings(props.article?.contentMd || ''))
+const hasToc = computed(() => tocHeadings.value.length > 0)
+/** 手机折叠目录的门槛：至少 3 个二级标题才给入口，两三个小标题的短文不需要多一层点击 */
+const mobileTocCount = computed(() => tocHeadings.value.filter((h: any) => h.depth <= 2).length)
 function toggleToc() {
   tocCollapsed.value = !tocCollapsed.value
   try {
@@ -545,4 +648,41 @@ const { data: relatedData } = await useAsyncData(
   { watch: [articleId], default: () => [] }
 )
 const related = computed<any[]>(() => relatedData.value || [])
+
+/* ---- 系列：标题上方的「第 N 篇 / 共 M 篇」与文末「系列下一篇」 ----
+   顺序由后端按发布时间的升序给（站内暂无 series_order 字段）。
+   系列接口只返回其余成员的精简字段，正文不重复拉。 */
+const seriesName = computed(() => String(props.article?.series || '').trim())
+const { data: seriesData } = await useAsyncData(
+  `article-series-${articleId.value}`,
+  async () => {
+    if (!seriesName.value) return null
+    try {
+      const res = await get<any>(`/article/series/detail?name=${encodeURIComponent(seriesName.value)}`)
+      if (res.code === 200 && res.data) return res.data
+    } catch {}
+    return null
+  },
+  { watch: [articleId, seriesName], default: () => null }
+)
+
+/**
+ * 当前位置。
+ * - 只有 1 篇时不显示「第 1 篇 / 共 1 篇」——那不是连载，是单篇挂了个系列名。
+ * - 找不到自己（文章刚被移出系列、或缓存还没刷新）整块不显示：
+ *   宁可少一行，也不显示「第 ? 篇 / 共 4 篇」。
+ */
+const seriesInfo = computed(() => {
+  const list = seriesData.value?.articles
+  if (!Array.isArray(list) || list.length < 2) return null
+  const i = list.findIndex((a: any) => a.id === articleId.value)
+  if (i < 0) return null
+  return {
+    name: seriesData.value.name || seriesName.value,
+    index: i + 1,
+    count: list.length,
+    prev: list[i - 1] || null,
+    next: list[i + 1] || null,
+  }
+})
 </script>

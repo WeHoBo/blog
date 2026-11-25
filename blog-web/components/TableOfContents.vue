@@ -1,7 +1,17 @@
 ﻿<template>
   <nav v-if="items.length > 0" class="toc text-sm">
-    <div class="flex items-center justify-between gap-2 mb-3 pl-2 pr-1">
-      <h4 class="font-semibold text-gray-900 dark:text-gray-100">📑 目录</h4>
+    <!-- hideTitle：手机端折叠面板的 summary 已经写了「本文目录 · N 节」，
+         里面再出现一遍标题就是同一句话说两次 -->
+    <div v-if="!hideTitle" class="flex items-center justify-between gap-2 mb-3 pl-2 pr-1">
+      <h4 class="flex items-center gap-1.5 font-semibold text-gray-900 dark:text-gray-100">
+        <!-- 📑 换成线条图标：emoji 在 Windows 上是彩色方块，和旁边墨色标题不是一套视觉语言 -->
+        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.6"
+          stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5.5h6l1.6 2H20a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
+          <path d="M3 10.5h18" />
+        </svg>
+        目录
+      </h4>
       <!-- 收起按钮：和标题同一行，不额外占一行高度 -->
       <button v-if="collapsible" type="button" @click="$emit('collapse')"
         class="p-1 rounded-md text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
@@ -30,7 +40,7 @@
 import { computed } from 'vue'
 import { extractHeadings } from '~/utils/markdownCore'
 
-const props = defineProps<{ content: string; collapsible?: boolean }>()
+const props = defineProps<{ content: string; collapsible?: boolean; hideTitle?: boolean; expanded?: boolean }>()
 defineEmits<{ (e: 'collapse'): void }>()
 
 /**
@@ -55,60 +65,62 @@ const items = computed(() => extractHeadings(props.content))
 const activeId = ref('')
 const tocList = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
-let rafId = 0
+let media: MediaQueryList | null = null
+let elements: HTMLElement[] = []
 
 function updateActive() {
-  let current = items.value[0]?.id || ''
-  for (const item of items.value) {
-    const el = document.getElementById(item.id)
-    if (el && el.getBoundingClientRect().top <= 120) {
-      current = item.id
-    }
+  let low = 0
+  let high = elements.length
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2)
+    if (elements[mid].getBoundingClientRect().top <= 121) low = mid + 1
+    else high = mid
   }
-  activeId.value = current
+  activeId.value = elements[Math.max(0, low - 1)]?.id || ''
 }
 
-function onScroll() {
-  // rAF 节流：避免长文滚动时每个滚动事件都触发一次全量 getBoundingClientRect
-  if (rafId) return
-  rafId = requestAnimationFrame(() => {
-    rafId = 0
-    updateActive()
-  })
+function subscribe() {
+  observer?.disconnect()
+  window.removeEventListener('scrollend', updateActive)
+  if (!media?.matches || (props.hideTitle && !props.expanded)) return
+  elements = items.value.map(item => document.getElementById(item.id)).filter((el): el is HTMLElement => !!el)
+  if (!elements.length) return
+  observer = new IntersectionObserver(updateActive, { rootMargin: '-120px 0px 0px 0px' })
+  elements.forEach(el => observer!.observe(el))
+  window.addEventListener('scrollend', updateActive, { passive: true })
+  updateActive()
 }
 
 onMounted(() => {
-  // IntersectionObserver 兜底
-  observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) activeId.value = entry.target.id
-    }
-  }, { rootMargin: '-80px 0px -80% 0px' })
-  items.value.forEach(h => {
-    const el = document.getElementById(h.id)
-    if (el) observer!.observe(el)
-  })
-  // 实时滚动跟随
-  window.addEventListener('scroll', onScroll, { passive: true })
-  updateActive()
+  media = window.matchMedia(props.hideTitle ? '(max-width: 1023px)' : '(min-width: 1024px)')
+  media.addEventListener('change', subscribe)
+  subscribe()
 })
+watch([items, () => props.expanded], () => { if (media) subscribe() }, { flush: 'post' })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', onScroll)
-  if (observer) observer.disconnect()
-  if (rafId) cancelAnimationFrame(rafId)
+  observer?.disconnect()
+  media?.removeEventListener('change', subscribe)
+  window.removeEventListener('scrollend', updateActive)
 })
 
-// 目录跟随：高亮项超出可视区时自动平滑滚动
+function motion(): ScrollBehavior {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
+}
+
 watch(activeId, () => {
-  nextTick(() => {
-    const el = tocList.value?.querySelector('.toc-active')
-    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  })
-})
+  if (!props.collapsible || !media?.matches) return
+  const scroller = tocList.value?.closest<HTMLElement>('[data-toc-scroll]')
+  const active = tocList.value?.querySelector('.toc-active')
+  if (!scroller || !active) return
+  const bounds = scroller.getBoundingClientRect()
+  const rect = active.getBoundingClientRect()
+  const delta = rect.top < bounds.top ? rect.top - bounds.top : Math.max(0, rect.bottom - bounds.bottom)
+  if (delta) scroller.scrollBy({ top: delta, behavior: motion() })
+}, { flush: 'post' })
 
 function scrollToHeading(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  document.getElementById(id)?.scrollIntoView({ behavior: motion(), block: 'start' })
 }
 </script>
 
