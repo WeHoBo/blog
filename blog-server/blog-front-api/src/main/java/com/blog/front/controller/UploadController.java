@@ -4,11 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blog.common.dto.Result;
 import com.blog.common.entity.UploadFile;
-import com.blog.common.exception.BusinessException;
 import com.blog.common.file.FileStorage;
 import com.blog.common.mapper.UploadFileMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Locale;
 import java.util.Set;
@@ -52,10 +53,10 @@ public class UploadController {
     @PostMapping("/avatar")
     public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("上传文件为空");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件为空");
         }
         if (file.getSize() > AVATAR_MAX_BYTES) {
-            throw new BusinessException(400, "头像不能超过 2MB");
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "头像不能超过 2 MiB");
         }
         String originalName = file.getOriginalFilename();
         String ext = "";
@@ -63,11 +64,11 @@ public class UploadController {
             ext = originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         }
         if (!AVATAR_EXT.contains(ext)) {
-            throw new BusinessException(400, "头像仅支持图片格式: " + String.join(", ", AVATAR_EXT));
+            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "头像仅支持 " + String.join(", ", AVATAR_EXT));
         }
         String contentType = file.getContentType();
         if (contentType != null && !contentType.isBlank() && !contentType.startsWith("image/")) {
-            throw new BusinessException(400, "文件内容类型不合法: " + contentType);
+            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "请选择受支持的图片文件");
         }
         String url = fileStorage.upload(file);
         log.info("头像上传成功: userId={}, ext={}, size={}B, url={}",
@@ -89,7 +90,7 @@ public class UploadController {
     @PostMapping
     public Result<String> upload(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("上传文件为空");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件为空");
         }
         String originalName = file.getOriginalFilename();
         String ext = "";
@@ -97,13 +98,13 @@ public class UploadController {
             ext = originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         }
         if (!ALLOWED_EXT.contains(ext)) {
-            throw new BusinessException("不支持的文件类型，仅允许: " + String.join(", ", ALLOWED_EXT));
+            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "不支持的文件类型，仅允许 " + String.join(", ", ALLOWED_EXT));
         }
         // 二次校验：部分客户端会伪造 Content-Type，空类型或明显不符时拒绝
         String contentType = file.getContentType();
-        if (contentType != null && !contentType.isBlank() && !contentType.startsWith("image/")
-                && !"application/pdf".equals(contentType)) {
-            throw new BusinessException("文件内容类型不合法: " + contentType);
+        if (contentType != null && !contentType.isBlank()
+                && !("pdf".equals(ext) ? "application/pdf".equals(contentType) : contentType.startsWith("image/"))) {
+            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "文件类型与扩展名不符");
         }
         String url = fileStorage.upload(file);
         // 记一笔素材库流水。记录失败不影响本次上传结果 —— 图已经存好了，

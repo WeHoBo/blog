@@ -7,8 +7,10 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 @Component
 @ConditionalOnProperty(name = "aliyun.oss.enabled", havingValue = "true")
@@ -52,11 +54,13 @@ public class OssFileStorage implements FileStorage {
                     : ".png";
             String objectName = baseDir + IdUtil.simpleUUID() + suffix;
 
-            ossClient.putObject(bucketName, objectName, file.getInputStream());
+            try (var input = file.getInputStream()) {
+                ossClient.putObject(bucketName, objectName, input);
+            }
 
             return "https://" + bucketName + "." + endpoint + "/" + objectName;
         } catch (Exception e) {
-            throw new com.blog.common.exception.BusinessException("OSS 上传失败: " + e.getMessage());
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "文件存储暂不可用，请稍后重试", e);
         }
     }
 }

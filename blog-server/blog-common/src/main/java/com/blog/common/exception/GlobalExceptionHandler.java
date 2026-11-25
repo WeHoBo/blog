@@ -5,7 +5,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -15,6 +17,9 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * 全局异常处理。
@@ -36,6 +41,38 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @Value("${spring.servlet.multipart.max-file-size:10MB}")
+    private String maxFileSize;
+
+    @Value("${spring.servlet.multipart.max-request-size:20MB}")
+    private String maxRequestSize;
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+    public Result<?> handleUploadLimit(MaxUploadSizeExceededException e) {
+        log.warn("上传超限 rid={} {} {} fileLimit={} requestLimit={}", rid(), method(), uri(), maxFileSize, maxRequestSize);
+        return Result.fail(413, "上传超限，单文件上限 " + maxFileSize + "，整次请求上限 " + maxRequestSize);
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMissingPart(MissingServletRequestPartException e) {
+        log.warn("上传缺少文件 rid={} {} {}", rid(), method(), uri());
+        return Result.fail(400, "请求缺少文件");
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Result<?>> handleStatus(ResponseStatusException e) {
+        int status = e.getStatusCode().value();
+        String reason = e.getReason() == null ? "请求失败" : e.getReason();
+        if (e.getStatusCode().is5xxServerError()) {
+            log.error("请求失败 rid={} {} {} status={}", rid(), method(), uri(), status, e);
+        } else {
+            log.warn("请求被拒绝 rid={} {} {} status={} reason={}", rid(), method(), uri(), status, reason);
+        }
+        return ResponseEntity.status(e.getStatusCode()).body(Result.fail(status, reason));
+    }
 
     @ExceptionHandler(BusinessException.class)
     public Result<?> handleBusinessException(BusinessException e) {

@@ -35,6 +35,7 @@ public class CorsConfig {
         config.setAllowedOrigins(origins);
 
         config.addAllowedHeader("*");
+        config.addExposedHeader("X-Request-Id");
         config.addAllowedMethod("*");
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

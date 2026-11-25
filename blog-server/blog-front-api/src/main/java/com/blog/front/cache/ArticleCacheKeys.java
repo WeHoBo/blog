@@ -14,24 +14,11 @@ public final class ArticleCacheKeys {
     }
 
     /** 归档聚合结果 */
-    public static final String ARCHIVE = "article:archive";
+    public static final String ARCHIVE = "article:archive:published";
 
     /** 系列聚合结果 */
     public static final String SERIES = "article:series";
 
     /** 聚合缓存存活时间 */
     public static final Duration AGG_TTL = Duration.ofMinutes(10);
-
-    /** 单篇文章详情缓存（含正文） */
-    public static final Duration ARTICLE_TTL = Duration.ofMinutes(10);
-
-    /** 单篇文章详情缓存 key */
-    public static String article(Long id) {
-        return "article:" + id;
-    }
-
-    /** 浏览量窗口增量计数器 key */
-    public static String viewCount(Long id) {
-        return "article:view:" + id;
-    }
 }

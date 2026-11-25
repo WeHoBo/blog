@@ -13,10 +13,9 @@ import com.blog.front.service.ArticleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -146,6 +145,7 @@ public class CategoryController {
      * 分类页文章数按 category_id 聚合，置 NULL 要等下次启动回填后才数得到。
      */
     @PreAuthorize("hasRole('admin')")
+    @Transactional
     @DeleteMapping("/{id}")
     public Result<Integer> delete(@PathVariable Long id) {
         Category target = categoryMapper.selectById(id);
@@ -156,40 +156,9 @@ public class CategoryController {
         if (CategoryConstants.DEFAULT_CATEGORY_NAME.equals(target.getName())) {
             return Result.fail(400, "「" + CategoryConstants.DEFAULT_CATEGORY_NAME + "」是系统内置分类，不能删除");
         }
-        List<Long> ids = collectSubtreeIds(id);
+        List<Long> ids = categoryMapper.subtreeIds(id);
         articleService.cascadeReassignToDefault(ids);
         categoryMapper.deleteBatchIds(ids);
         return Result.ok(ids.size());
-    }
-
-    /**
-     * 收集以 rootId 为根的整棵分类子树 id（含自身）。
-     *
-     * <p>一次查出全部分类在内存里建 children 索引，避免按层递归产生 N+1 查询；
-     * 用 visited 集合同时承担「防重复入队」和「防御脏数据的父子环」两个职责。
-     */
-    private List<Long> collectSubtreeIds(Long rootId) {
-        Map<Long, List<Long>> childrenMap = new HashMap<>();
-        for (Category c : categoryMapper.selectList(null)) {
-            if (c.getParentId() == null || c.getParentId() == 0) {
-                continue;
-            }
-            childrenMap.computeIfAbsent(c.getParentId(), k -> new ArrayList<>()).add(c.getId());
-        }
-        List<Long> ids = new ArrayList<>();
-        Set<Long> visited = new HashSet<>();
-        ArrayDeque<Long> queue = new ArrayDeque<>();
-        queue.add(rootId);
-        visited.add(rootId);
-        while (!queue.isEmpty()) {
-            Long current = queue.poll();
-            ids.add(current);
-            for (Long child : childrenMap.getOrDefault(current, List.of())) {
-                if (visited.add(child)) {
-                    queue.add(child);
-                }
-            }
-        }
-        return ids;
     }
 }

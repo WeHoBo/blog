@@ -1,5 +1,6 @@
 package com.blog.common.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -12,6 +13,9 @@ import java.time.LocalDateTime;
 public class Article extends BaseEntity {
 
     private String title;
+
+    @TableField(exist = false)
+    private String editVersion;
 
     private String slug;
 

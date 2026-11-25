@@ -82,8 +82,7 @@ public class AccountService {
 
         User user = new User();
         user.setUsername(username);
-        user.setPassword(passwordEncoder.encode(dto.getPassword()));
-        user.setPasswordSet(1);
+        user.useEncodedPassword(passwordEncoder.encode(dto.getPassword()));
         user.setNickname(StrUtil.isBlank(dto.getNickname()) ? username : dto.getNickname().trim());
         user.setPhone(phone);
         user.setPhoneVerifiedAt(LocalDateTime.now());
@@ -180,8 +179,7 @@ public class AccountService {
         if (user == null) {
             throw new BusinessException(400, "该手机号尚未注册");
         }
-        user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
-        user.setPasswordSet(1);
+        user.useEncodedPassword(passwordEncoder.encode(dto.getNewPassword()));
         userMapper.updateById(user);
         // 密码变了，之前签发的 token 一律作废 —— 改密码的常见动机就是「怀疑被人登了」，
         // 不撤销的话那些会话还能继续用满 24 小时，等于改了也白改
@@ -211,8 +209,7 @@ public class AccountService {
             }
         }
 
-        user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
-        user.setPasswordSet(1);
+        user.useEncodedPassword(passwordEncoder.encode(dto.getNewPassword()));
         userMapper.updateById(user);
         if (hasPassword) {
             // 只有「改密码」才撤销：常见动机是怀疑密码泄露，旧会话必须立刻失效。

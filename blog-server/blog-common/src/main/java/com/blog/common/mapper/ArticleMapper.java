@@ -16,6 +16,46 @@ import java.util.Map;
 @Mapper
 public interface ArticleMapper extends BaseMapper<Article> {
 
+    String PUBLICATION_TIME = "COALESCE(publish_at, create_time)";
+
+    /** 先锁定文章再比较编辑版本和保存快照，避免两个编辑会话互相覆盖。 */
+    @Select("SELECT * FROM article WHERE id = #{id} AND is_deleted = 0 FOR UPDATE")
+    Article lockForEdit(@Param("id") Long id);
+
+    /** 仅写编辑字段，浏览量、点赞和评论各自独立更新。 */
+    @Update("""
+            UPDATE article SET title=#{title}, slug=#{slug}, content_md=#{contentMd}, content_html=#{contentHtml},
+                summary=#{summary}, cover=#{cover}, status=#{status}, publish_at=#{publishAt}, category_id=#{categoryId},
+                series=#{series}, is_top=#{isTop}, is_featured=#{isFeatured}, reject_reason=#{rejectReason},
+                word_count=#{wordCount}, update_time=CURRENT_TIMESTAMP
+            WHERE id=#{id} AND is_deleted=0
+            """)
+    int saveEditedFields(Article article);
+
+    @Select("SELECT view_count FROM article WHERE id=#{id} AND status=1 AND is_deleted=0")
+    Integer publishedViewCount(@Param("id") Long id);
+
+    @Update("UPDATE article SET view_count=COALESCE(view_count, 0)+1, update_time=update_time "
+            + "WHERE id=#{id} AND status=1 AND is_deleted=0")
+    int incrementPublicViews(@Param("id") Long id);
+
+    @Select("SELECT id FROM article WHERE status=1 AND is_deleted=0 "
+            + "AND id=(SELECT article_id FROM comment WHERE id=#{commentId}) FOR UPDATE")
+    Long lockPublicArticleForReport(@Param("commentId") Long commentId);
+
+    @Select("SELECT id FROM article WHERE id=#{id} FOR UPDATE")
+    Long lockForCommentRemoval(@Param("id") Long id);
+
+    @Update("UPDATE article SET comment_count=(SELECT COUNT(*) FROM comment WHERE article_id=#{id} AND status=1), "
+            + "update_time=update_time WHERE id=#{id}")
+    int refreshCommentCount(@Param("id") Long id);
+
+    @Delete("DELETE r FROM comment_report r JOIN comment c ON c.id=r.comment_id WHERE c.article_id=#{id}")
+    int deleteCommentReports(@Param("id") Long id);
+
+    @Delete("DELETE FROM comment WHERE article_id=#{id}")
+    int deleteComments(@Param("id") Long id);
+
     /**
      * 一条 SQL 统计各分类「直属」的已发布文章数，替代逐个分类 selectCount 的 N+1 查询。
      * 子孙分类的汇总在应用层做一次记忆化递归即可（分类数量很小）。

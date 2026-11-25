@@ -54,6 +54,25 @@ public class OperationLogService {
 
     private final OperationLogMapper operationLogMapper;
 
+    public void recordSiteWrite(HttpServletRequest request, Long userId, int status, long costMs) {
+        try {
+            boolean upload = "/api/upload".equals(request.getRequestURI());
+            boolean success = status >= 200 && status < 300;
+            String action = upload ? "上传素材" : "保存站点设置";
+            OperationLog row = new OperationLog();
+            row.setUserId(userId);
+            row.setAction(success ? action : action + "（HTTP " + status + "）");
+            row.setTargetType(upload ? "upload" : "site_config");
+            row.setStatus(success ? 1 : 0);
+            row.setIp(ApiAccessLogFilter.clientIp(request));
+            row.setRequestId((String) request.getAttribute(ApiAccessLogFilter.RID_ATTR));
+            row.setCostMs(costMs);
+            operationLogMapper.insert(row);
+        } catch (Exception e) {
+            log.error("站点操作审计写入失败 rid={}", request.getAttribute(ApiAccessLogFilter.RID_ATTR), e);
+        }
+    }
+
     /**
      * 需要审计的写操作。
      *

@@ -91,8 +91,10 @@ CREATE TABLE article (
     KEY idx_category (category_id),
     KEY idx_user (user_id),
     KEY idx_create_time (create_time),
-    -- 列表查询固定过滤 status + is_deleted，并按 is_top / create_time 排序
+    -- 后台文章列表按置顶和创建时间排序
     KEY idx_list (status, is_deleted, is_top, create_time),
+    -- 公开列表和相邻文章使用相同的排序列，兼容历史文章没有 publish_at 的情况。
+    KEY idx_article_public_order (status, is_deleted, (COALESCE(is_top,0)), (COALESCE(publish_at,create_time)), id),
     -- 定时发布任务：固定条件 status + publish_at，且 publish_at 非空
     KEY idx_publish_at (status, publish_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文章表';

@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -109,15 +110,7 @@ public class ArticleController {
             @RequestParam(required = false) Integer featured,
             // 置顶过滤：1 只要置顶 / 0 排除置顶。首页中间取 1、右侧「全部文章」取 0
             @RequestParam(required = false) Integer top) {
-        List<Long> categoryIds = null;
-        if (categoryId != null) {
-            categoryIds = new ArrayList<>();
-            categoryIds.add(categoryId);
-            List<Category> children = categoryMapper.selectList(
-                    new LambdaQueryWrapper<Category>().eq(Category::getParentId, categoryId));
-            categoryIds.addAll(children.stream().map(Category::getId).collect(Collectors.toList()));
-        }
-        Page<Article> page = articleService.page(pageNum, pageSize, categoryId, tagId, keyword, categoryIds, sort, featured, top);
+        Page<Article> page = articleService.page(pageNum, pageSize, categoryId, tagId, keyword, null, sort, featured, top);
         List<Article> articles = page.getRecords();
         List<Map<String, Object>> records = new ArrayList<>();
         if (!articles.isEmpty()) {
@@ -191,7 +184,7 @@ public class ArticleController {
     public Result<Map<String, Object>> bySlug(@PathVariable String slug,
                                               @RequestHeader(value = "X-Blog-Client", required = false) String client) {
         Article article = articleMapper.selectOne(
-                new LambdaQueryWrapper<Article>().eq(Article::getSlug, slug));
+                new LambdaQueryWrapper<Article>().select(Article::getId).eq(Article::getSlug, slug));
         if (article == null) return Result.fail(404, "文章不存在");
         return detail(article.getId(), client);
     }
@@ -205,6 +198,7 @@ public class ArticleController {
                 : articleService.getPublicById(id, countView);
         List<Tag> tags = articleService.getTagsByArticleId(id);
         Map<String, Object> result = new HashMap<>();
+        if (isAdmin()) articleService.attachEditVersion(article, tags);
         result.put("article", article);
         result.put("tags", tags);
         if (article.getUserId() != null) {
@@ -550,21 +544,23 @@ public class ArticleController {
                 new LambdaQueryWrapper<Article>()
                         .eq(Article::getStatus, 1)
                         .eq(Article::getIsDeleted, 0)
-                        .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCreateTime)
-                        .orderByDesc(Article::getCreateTime));
+                        .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCreateTime, Article::getPublishAt)
+                        .last("ORDER BY " + ArticleMapper.PUBLICATION_TIME + " DESC, id DESC"));
 
         Map<Integer, Map<Integer, List<Map<String, Object>>>> yearMap = new LinkedHashMap<>();
         for (Article a : articles) {
-            if (a.getCreateTime() == null) continue;
-            int year = a.getCreateTime().getYear();
-            int month = a.getCreateTime().getMonthValue();
+            LocalDateTime date = a.getPublishAt() != null ? a.getPublishAt() : a.getCreateTime();
+            if (date == null) continue;
+            int year = date.getYear();
+            int month = date.getMonthValue();
             yearMap.putIfAbsent(year, new LinkedHashMap<>());
             yearMap.get(year).putIfAbsent(month, new ArrayList<>());
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", a.getId());
             item.put("title", a.getTitle());
             item.put("slug", a.getSlug());
-            item.put("createTime", a.getCreateTime().toString().substring(0, 10));
+            item.put("createTime", a.getCreateTime() == null ? null : a.getCreateTime().toLocalDate().toString());
+            item.put("publishAt", date.toLocalDate().toString());
             yearMap.get(year).get(month).add(item);
         }
 
@@ -616,6 +612,46 @@ public class ArticleController {
             result.add(item);
         }
         writeAggCache(ArticleCacheKeys.SERIES, result);
+        return Result.ok(result);
+    }
+
+    /**
+     * 某个系列的全部成员（按阅读顺序），供详情页「第 N 篇 / 共 M 篇」与首页系列目录使用。
+     *
+     * <p>排序口径按**发布时间升序**：站内没有 series_order 字段，
+     * 连载文章的发布时间通常就是写作顺序，先用它凑合。
+     * 将来要给作者手动排序，只改这里的比较器（加一列），前端不用动。
+     *
+     * <p>⚠️ 排序放在 Java 侧做，不用 {@code orderByAsc(Article::getPublishAt)}：
+     * MySQL 的 ASC 会把 NULL 排在最前面，历史文章的 publish_at 多为 NULL，
+     * 一升序它们就跑到系列开头去了。这里用 publish_at，为空回落到 create_time。
+     *
+     * <p>不做 Redis 缓存：一次带索引的 selectList 而已，
+     * 加了反而要处理「系列新增成员」的失效（现有 evictAggCache 只删固定的两个 key）。
+     */
+    @GetMapping("/series/detail")
+    public Result<Map<String, Object>> seriesDetail(@RequestParam("name") String name) {
+        String series = name == null ? "" : name.trim();
+        if (series.isEmpty()) {
+            throw new BusinessException(400, "系列名不能为空");
+        }
+        List<Article> articles = articleMapper.selectList(
+                new LambdaQueryWrapper<Article>()
+                        .eq(Article::getStatus, 1)
+                        .eq(Article::getIsDeleted, 0)
+                        .eq(Article::getSeries, series)
+                        .select(Article::getId, Article::getTitle, Article::getSlug,
+                                Article::getCover, Article::getSummary, Article::getWordCount,
+                                Article::getPublishAt, Article::getCreateTime));
+        Comparator<Article> byTimeline = Comparator.comparing(
+                (Article a) -> a.getPublishAt() != null ? a.getPublishAt() : a.getCreateTime(),
+                Comparator.nullsLast(Comparator.naturalOrder()));
+        articles.sort(byTimeline.thenComparing(Article::getId));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("name", series);
+        result.put("count", articles.size());
+        result.put("articles", articles);
         return Result.ok(result);
     }
 }

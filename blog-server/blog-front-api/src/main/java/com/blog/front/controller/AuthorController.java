@@ -62,8 +62,10 @@ public class AuthorController {
     public Result<Map<String, Object>> detail(@PathVariable Long id) {
         Article article = articleService.getOwnArticle(id, currentUserId());
         Map<String, Object> data = new java.util.LinkedHashMap<>();
+        var tags = articleService.getTagsByArticleId(article.getId());
+        articleService.attachEditVersion(article, tags);
         data.put("article", article);
-        data.put("tags", articleService.getTagsByArticleId(article.getId()));
+        data.put("tags", tags);
         return Result.ok(data);
     }
 

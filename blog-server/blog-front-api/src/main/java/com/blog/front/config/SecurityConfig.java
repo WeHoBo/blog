@@ -38,7 +38,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/category/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/tag/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/comment/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/friend-link/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/friend-link/list").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/site-config/public").permitAll()
                 .requestMatchers("/api/auth/oauth/**").permitAll()
                 // 账号体系里匿名必须可达的 5 个入口。

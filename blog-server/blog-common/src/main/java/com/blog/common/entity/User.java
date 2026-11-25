@@ -25,6 +25,12 @@ public class User extends BaseEntity {
      */
     private Integer passwordSet;
 
+    /** 设置用户实际可用的密码。第三方账号的随机占位密码不走此方法。 */
+    public void useEncodedPassword(String hash) {
+        this.password = hash;
+        this.passwordSet = 1;
+    }
+
     private String nickname;
 
     private String avatar;

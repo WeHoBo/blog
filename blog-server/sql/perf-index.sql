@@ -15,6 +15,17 @@
 
 USE blog;
 
+-- 公开列表与相邻文章的发布时间排序（MySQL 8.0.13+ 函数索引）。
+SET @publication_index_sql = IF(
+    EXISTS(SELECT 1 FROM information_schema.statistics
+           WHERE table_schema = DATABASE() AND table_name = 'article' AND index_name = 'idx_article_public_order'),
+    'SELECT 1',
+    'ALTER TABLE article ADD INDEX idx_article_public_order (status, is_deleted, (COALESCE(is_top,0)), (COALESCE(publish_at,create_time)), id)'
+);
+PREPARE publication_index FROM @publication_index_sql;
+EXECUTE publication_index;
+DEALLOCATE PREPARE publication_index;
+
 -- 1) 文章列表查询：固定过滤 status + is_deleted，并按 is_top / create_time 排序
 ALTER TABLE article
     ADD INDEX idx_list (status, is_deleted, is_top, create_time);

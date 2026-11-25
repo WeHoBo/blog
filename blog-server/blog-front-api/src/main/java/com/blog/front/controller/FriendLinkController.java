@@ -27,6 +27,13 @@ public class FriendLinkController {
     }
 
     @PreAuthorize("hasRole('admin')")
+    @GetMapping("/admin/list")
+    public Result<List<FriendLink>> adminList() {
+        return Result.ok(friendLinkMapper.selectList(new LambdaQueryWrapper<FriendLink>()
+                .orderByAsc(FriendLink::getSort, FriendLink::getId)));
+    }
+
+    @PreAuthorize("hasRole('admin')")
     @PostMapping
     public Result<FriendLink> create(@Valid @RequestBody FriendLink link) {
         friendLinkMapper.insert(link);

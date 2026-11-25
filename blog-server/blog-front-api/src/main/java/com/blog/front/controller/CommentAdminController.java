@@ -17,6 +17,7 @@ import com.blog.common.vo.CommentAdminVO;
 import com.blog.common.vo.CommentReportVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -143,9 +144,10 @@ public class CommentAdminController {
     }
 
     /** 删除评论（物理删除）并回填文章评论数、关闭该评论下所有举报 */
+    @Transactional
     @DeleteMapping("/{id}")
     public Result<?> delete(@PathVariable Long id) {
-        deleteComment(id);
+        deleteComment(id, null);
         return Result.ok();
     }
 
@@ -219,6 +221,7 @@ public class CommentAdminController {
      * <p>action = ignore：只把这条举报标记为已忽略，评论保留；
      * action = delete：删掉评论，并把该评论下所有举报一起标记为「已删除」。</p>
      */
+    @Transactional
     @PutMapping("/reports/{id}")
     public Result<?> handleReport(@PathVariable Long id, @RequestBody Map<String, String> body) {
         CommentReport report = commentReportMapper.selectById(id);
@@ -226,12 +229,16 @@ public class CommentAdminController {
             throw new BusinessException("举报不存在");
         }
         String action = body == null ? null : body.get("action");
+        if (!Integer.valueOf(0).equals(report.getStatus())) {
+            throw new BusinessException(409, "举报已经处理，请刷新列表");
+        }
         if ("ignore".equals(action)) {
-            commentReportMapper.update(null, new LambdaUpdateWrapper<CommentReport>()
+            int updated = commentReportMapper.update(null, new LambdaUpdateWrapper<CommentReport>()
                     .set(CommentReport::getStatus, 1)
-                    .eq(CommentReport::getId, id));
+                    .eq(CommentReport::getId, id).eq(CommentReport::getStatus, 0));
+            if (updated == 0) throw new BusinessException(409, "举报已经处理，请刷新列表");
         } else if ("delete".equals(action)) {
-            deleteComment(report.getCommentId());
+            deleteComment(report.getCommentId(), report.getId());
         } else {
             throw new BusinessException("未知操作");
         }
@@ -239,20 +246,22 @@ public class CommentAdminController {
     }
 
     /** 删除评论的公共逻辑：删评论 → 回填文章评论数 → 关闭其名下所有举报 */
-    private void deleteComment(Long commentId) {
+    private void deleteComment(Long commentId, Long pendingReportId) {
         Comment comment = commentMapper.selectById(commentId);
         if (comment == null) {
             throw new BusinessException("评论不存在或已删除");
         }
-        commentMapper.deleteById(commentId);
-
-        Long remain = commentMapper.selectCount(new LambdaQueryWrapper<Comment>()
-                .eq(Comment::getArticleId, comment.getArticleId())
-                .eq(Comment::getStatus, 1));
-        articleMapper.update(null, new LambdaUpdateWrapper<Article>()
-                .set(Article::getCommentCount, remain == null ? 0 : remain.intValue())
-                .eq(Article::getId, comment.getArticleId()));
-
+        articleMapper.lockForCommentRemoval(comment.getArticleId());
+        if (commentMapper.deleteById(commentId) == 0) {
+            throw new BusinessException(409, "评论已被处理，请刷新列表");
+        }
+        if (pendingReportId != null) {
+            int claimed = commentReportMapper.update(null, new LambdaUpdateWrapper<CommentReport>()
+                    .eq(CommentReport::getId, pendingReportId).eq(CommentReport::getStatus, 0)
+                    .set(CommentReport::getStatus, 2));
+            if (claimed == 0) throw new BusinessException(409, "举报已经处理，请刷新列表");
+        }
+        articleMapper.refreshCommentCount(comment.getArticleId());
         commentReportMapper.update(null, new LambdaUpdateWrapper<CommentReport>()
                 .set(CommentReport::getStatus, 2)
                 .eq(CommentReport::getCommentId, commentId));

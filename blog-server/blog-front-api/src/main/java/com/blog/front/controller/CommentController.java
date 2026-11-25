@@ -21,6 +21,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -53,7 +54,8 @@ public class CommentController {
         // 以前只判评论自己的 status，于是「文章下架 / 进回收站」之后，
         // 那条文章页确实 404 了，但它的旧评论内容和评论者昵称仍能从接口原样取出来 ——
         // 内容下线应该是整条链路一起下线，不能只摘掉入口。
-        Article article = articleMapper.selectById(articleId);
+        Article article = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getStatus, Article::getIsDeleted).eq(Article::getId, articleId));
         if (article == null
                 || (article.getIsDeleted() != null && article.getIsDeleted() == 1)
                 || article.getStatus() == null
@@ -96,6 +98,7 @@ public class CommentController {
         return Result.ok(voPage);
     }
 
+    @Transactional
     @PostMapping
     public Result<Comment> create(@RequestBody Comment comment) {
         if (comment.getArticleId() == null || comment.getContent() == null || comment.getContent().isBlank()) {
@@ -115,13 +118,11 @@ public class CommentController {
             throw new BusinessException("评论太频繁了，请稍后再试");
         }
 
-        // 只取校验所需的最小列，避免把文章正文一并读出来
-        Article article = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
-                .select(Article::getId, Article::getStatus)
-                .eq(Article::getId, comment.getArticleId()));
-        if (article == null || article.getStatus() == null || article.getStatus() != 1) {
-            throw new BusinessException("文章不存在或不可评论");
-        }
+        // 先锁定公开文章，撤稿或删除时不能再写入新评论。
+        int updated = articleMapper.update(null, new LambdaUpdateWrapper<Article>()
+                .setSql("comment_count = COALESCE(comment_count, 0) + 1, update_time=update_time")
+                .eq(Article::getId, comment.getArticleId()).eq(Article::getStatus, 1));
+        if (updated == 0) throw new BusinessException(404, "文章不存在或不可评论");
 
         // 仅落库必要字段，防止客户端伪造 id / createTime / userId / status
         Comment entity = new Comment();
@@ -130,12 +131,6 @@ public class CommentController {
         entity.setUserId(userId);
         entity.setStatus(1);
         commentMapper.insert(entity);
-
-        // 原子自增，避免「读-改-写」在并发下丢失计数
-        articleMapper.update(null, new LambdaUpdateWrapper<Article>()
-                .setSql("comment_count = comment_count + 1")
-                .eq(Article::getId, comment.getArticleId()));
-
         return Result.ok(entity);
     }
 
@@ -145,6 +140,7 @@ public class CommentController {
      * <p>只记录「谁、哪条、什么原因」，不复制正文；真正删不删由管理员在后台决定。
      * 同一个人对同一条评论只能举报一次（唯一键 uk_comment_user 兜住并发）。</p>
      */
+    @Transactional
     @PostMapping("/report")
     public Result<?> report(@RequestBody CommentReportForm form) {
         if (form == null || form.getCommentId() == null) {
@@ -156,7 +152,10 @@ public class CommentController {
         }
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
 
-        Comment comment = commentMapper.selectById(form.getCommentId());
+        if (articleMapper.lockPublicArticleForReport(form.getCommentId()) == null) {
+            throw new BusinessException("评论不存在或已删除");
+        }
+        Comment comment = commentMapper.lockForReport(form.getCommentId());
         if (comment == null || comment.getStatus() == null || comment.getStatus() != 1) {
             throw new BusinessException("评论不存在或已删除");
         }

@@ -1,5 +1,7 @@
 package com.blog.front.config;
 
+import com.blog.front.service.OperationLogService;
+import lombok.RequiredArgsConstructor;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,7 +48,9 @@ import java.util.UUID;
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
+@RequiredArgsConstructor
 public class ApiAccessLogFilter extends OncePerRequestFilter {
+    private final OperationLogService operationLogService;
 
     /** 独立 logger：方便在 logback 里单独指定文件、级别、保留天数 */
     private static final Logger ACCESS = LoggerFactory.getLogger("ACCESS");
@@ -76,16 +80,23 @@ public class ApiAccessLogFilter extends OncePerRequestFilter {
             throw e;
         } finally {
             long costMs = System.currentTimeMillis() - start;
-            MDC.remove(MDC_RID);
-            if (shouldLog(request)) {
+            try {
                 int status = failed ? 500 : response.getStatus();
-                ACCESS.info("{} {} status={} {}ms uid={} ip={}",
-                        request.getMethod(),
-                        request.getRequestURI(),
-                        status,
-                        costMs,
-                        request.getAttribute(UID_ATTR) == null ? "-" : request.getAttribute(UID_ATTR),
-                        maskIp(clientIp(request)));
+                if (shouldLog(request)) {
+                    ACCESS.info("{} {} status={} {}ms uid={} ip={}", request.getMethod(),
+                            request.getRequestURI(), status, costMs,
+                            request.getAttribute(UID_ATTR) == null ? "-" : request.getAttribute(UID_ATTR),
+                            maskIp(clientIp(request)));
+                }
+                if ("POST".equals(request.getMethod()) && request.getAttribute(UID_ATTR) instanceof Long userId) {
+                    // Multipart 解析可能先于控制器失败。按最终 HTTP 结果只写一次审计。
+                    String path = request.getRequestURI();
+                    if ("/api/upload".equals(path) || "/api/site-config/save".equals(path)) {
+                        operationLogService.recordSiteWrite(request, userId, status, costMs);
+                    }
+                }
+            } finally {
+                MDC.remove(MDC_RID);
             }
         }
     }

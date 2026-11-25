@@ -155,7 +155,7 @@ public class AiController {
 
                 resp = req.body(payload.getBytes(StandardCharsets.UTF_8))
                         .timeout(300000)
-                        .execute();
+                        .executeAsync();
 
                 int status = resp.getStatus();
                 if (status != 200) {

@@ -100,7 +100,8 @@ class CommentAdminControllerTest {
     @Test
     void reportRejectsOwnComment() {
         loginAs(7L);
-        when(commentMapper.selectById(9L)).thenReturn(comment(9L, 7L));
+        when(articleMapper.lockPublicArticleForReport(9L)).thenReturn(108L);
+        when(commentMapper.lockForReport(9L)).thenReturn(comment(9L, 7L));
 
         CommentReportForm form = new CommentReportForm();
         form.setCommentId(9L);
@@ -115,7 +116,8 @@ class CommentAdminControllerTest {
         loginAs(1L);
         Comment deleted = comment(9L, 7L);
         deleted.setStatus(0);
-        when(commentMapper.selectById(9L)).thenReturn(deleted);
+        when(articleMapper.lockPublicArticleForReport(9L)).thenReturn(108L);
+        when(commentMapper.lockForReport(9L)).thenReturn(deleted);
 
         CommentReportForm form = new CommentReportForm();
         form.setCommentId(9L);
@@ -127,7 +129,8 @@ class CommentAdminControllerTest {
     @Test
     void reportSavesPendingRecord() {
         loginAs(1L);
-        when(commentMapper.selectById(9L)).thenReturn(comment(9L, 7L));
+        when(articleMapper.lockPublicArticleForReport(9L)).thenReturn(108L);
+        when(commentMapper.lockForReport(9L)).thenReturn(comment(9L, 7L));
 
         CommentReportForm form = new CommentReportForm();
         form.setCommentId(9L);
@@ -145,7 +148,8 @@ class CommentAdminControllerTest {
     @Test
     void reportReturnsFriendlyMessageOnDuplicate() {
         loginAs(1L);
-        when(commentMapper.selectById(9L)).thenReturn(comment(9L, 7L));
+        when(articleMapper.lockPublicArticleForReport(9L)).thenReturn(108L);
+        when(commentMapper.lockForReport(9L)).thenReturn(comment(9L, 7L));
         when(reportMapper.insert(any(CommentReport.class))).thenThrow(new DuplicateKeyException("uk_comment_user"));
 
         CommentReportForm form = new CommentReportForm();
@@ -159,14 +163,13 @@ class CommentAdminControllerTest {
     @Test
     void deleteRecomputesArticleCommentCount() {
         when(commentMapper.selectById(9L)).thenReturn(comment(9L, 7L));
-        when(commentMapper.selectCount(any(Wrapper.class))).thenReturn(4L);
+        when(commentMapper.deleteById(9L)).thenReturn(1);
 
         adminController.delete(9L);
 
         verify(commentMapper).deleteById(9L);
-        // 先重算剩余条数，再把结果写回 article.comment_count（不是 ±1 猜的）
-        verify(commentMapper).selectCount(any(Wrapper.class));
-        verify(articleMapper).update(isNull(), any(Wrapper.class));
+        verify(articleMapper).lockForCommentRemoval(108L);
+        verify(articleMapper).refreshCommentCount(108L);
         // 该评论名下的举报一并关闭
         verify(reportMapper).update(isNull(), any(Wrapper.class));
     }
@@ -186,6 +189,7 @@ class CommentAdminControllerTest {
         report.setStatus(0);
         when(reportMapper.selectById(3L)).thenReturn(report);
 
+        when(reportMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
         adminController.handleReport(3L, java.util.Map.of("action", "ignore"));
 
         verify(commentMapper, never()).deleteById(anyLong());

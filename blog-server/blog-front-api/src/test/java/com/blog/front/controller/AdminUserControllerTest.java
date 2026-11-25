@@ -81,6 +81,19 @@ class AdminUserControllerTest {
     }
 
     @Test
+    void adminPasswordResetEnablesPasswordLoginForOAuthAccount() {
+        User old = user(8L, "user");
+        old.setPasswordSet(0);
+        User form = new User();
+        form.setPassword("new-password");
+        loginAs(3L);
+        when(userMapper.selectById(8L)).thenReturn(old);
+        controller.update(8L, form);
+        assertEquals(1, old.getPasswordSet());
+        verify(userMapper).updateById(old);
+    }
+
+    @Test
     void deleteMissingUser() {
         when(userMapper.selectById(9L)).thenReturn(null);
         BusinessException e = assertThrows(BusinessException.class, () -> controller.delete(9L, false));

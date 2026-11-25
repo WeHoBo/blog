@@ -36,11 +36,15 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,13 +58,6 @@ public class ArticleService {
 
     /** 单篇文章最多保留的历史版本数，超出即淘汰最旧的 */
     private static final int MAX_REVISIONS = 30;
-
-    /**
-     * 关键词命中标签/分类时最多回填的 id 数量。
-     * 不加限制的话，命中的标签一旦挂着上千篇文章，就会拼出一条几千项的 IN 列表，
-     * MySQL 解析成本随项数线性上升，还会撑爆 SQL 长度上限。
-     */
-    private static final int SEARCH_RELATION_ID_LIMIT = 500;
 
     /**
      * 自动保存模式下的快照节流间隔。
@@ -99,11 +96,8 @@ public class ArticleService {
     /**
      * 公开文章分页。
      *
-     * @param featured 精品（精品）过滤：1 只取 / 0 排除 / null 不限。**首页不再用它**，
-     *                 现在它只在后台与「精品」徽标相关的地方出现。
-     * @param top      置顶过滤：1 只取置顶 / 0 排除置顶 / null 不限。
-     *                 首页靠它分工：中间那栏取 {@code 1}，右侧「全部文章」取 {@code 0} ——
-     *                 置顶文章只在中间出现一次，右侧不重复展示。
+     * @param featured 精品过滤：1 只取精品 / 0 排除精品 / null 不限
+     * @param top      置顶过滤：1 只取置顶 / 0 排除置顶 / null 不限
      */
     public Page<Article> page(int pageNum, int pageSize, Long categoryId, Long tagId, String keyword,
                               List<Long> categoryIds, String sort, Integer featured, Integer top) {
@@ -119,29 +113,18 @@ public class ArticleService {
         if (categoryIds != null && !categoryIds.isEmpty()) {
             wrapper.in(Article::getCategoryId, categoryIds);
         } else if (categoryId != null) {
-            wrapper.eq(Article::getCategoryId, categoryId);
+            wrapper.in(Article::getCategoryId, categoryMapper.subtreeIds(categoryId));
         }
         if (StrUtil.isNotBlank(keyword)) {
             applyKeywordSearch(wrapper, keyword.trim());
         }
         if (tagId != null) {
-            List<ArticleTag> ats = articleTagMapper.selectList(
-                    new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getTagId, tagId));
-            List<Long> ids = ats.stream().map(ArticleTag::getArticleId).collect(Collectors.toList());
-            if (!ids.isEmpty()) {
-                wrapper.in(Article::getId, ids);
-            } else {
-                wrapper.eq(Article::getId, -1L);
-            }
+            wrapper.exists("SELECT 1 FROM article_tag atg WHERE atg.article_id=article.id AND atg.tag_id={0}", tagId);
         }
         if ("title".equals(sort)) {
-            // 标题正序。原先用 CAST(title AS UNSIGNED)，非纯数字标题一律被转成 0，
-            // 排序结果错乱（中文标题全部并列）。这里回归可预期的字符串排序。
-            wrapper.orderByDesc(Article::getIsTop)
-                    .orderByAsc(Article::getTitle);
+            wrapper.orderByDesc(Article::getIsTop).orderByAsc(Article::getTitle).orderByDesc(Article::getId);
         } else {
-            wrapper.orderByDesc(Article::getIsTop)
-                    .orderByDesc(Article::getCreateTime);
+            wrapper.last("ORDER BY COALESCE(is_top, 0) DESC, " + ArticleMapper.PUBLICATION_TIME + " DESC, id DESC");
         }
         // 列表只需要展示字段，显式排除 content_md / content_html 两个 LONGTEXT，
         // 否则每次翻页都会把整页文章的正文全文从数据库读回内存
@@ -153,73 +136,17 @@ public class ArticleService {
                 // 列表卡片上的日期优先显示「发布时间」，所以要把它一起查出来
                 Article::getPublishAt,
                 Article::getUserId);
-        return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+        return articleMapper.selectPage(new Page<>(Math.max(1, pageNum), Math.max(1, Math.min(100, pageSize))), wrapper);
     }
 
-    /**
-     * 关键词搜索：标题 + 摘要 + 标签名 + 分类名。
-     *
-     * <p>后两类命中没法直接在 article 表上 LIKE —— 标签在 article_tag 关联表、分类在 category 表，
-     * 所以先查出命中的 id 集合，再以 {@code OR id IN (...)} / {@code OR category_id IN (...)} 并入。
-     *
-     * <p>整组必须用 {@code and(...)} 包起来：外层已经有 {@code status=1}、{@code is_deleted=0} 条件，
-     * 如果直接在外层 {@code or()}，就会变成
-     * {@code status=1 AND is_deleted=0 AND title LIKE ? OR ...}，
-     * 后半个 OR 会把前两个条件短路掉 —— 草稿和已删除文章都会漏到前台搜索结果里。
-     */
+    /** 标题、摘要、分类和标签使用同一个 OR 分组，外层公开状态与分页条件对四者都生效。 */
     private void applyKeywordSearch(LambdaQueryWrapper<Article> wrapper, String keyword) {
-        List<Long> tagArticleIds = articleIdsByTagKeyword(keyword);
-        List<Long> categoryIds = categoryIdsByKeyword(keyword);
-        wrapper.and(w -> {
-            w.like(Article::getTitle, keyword)
-                    .or().like(Article::getSummary, keyword);
-            if (!categoryIds.isEmpty()) {
-                w.or().in(Article::getCategoryId, categoryIds);
-            }
-            if (!tagArticleIds.isEmpty()) {
-                w.or().in(Article::getId, tagArticleIds);
-            }
-        });
-    }
-
-    /** 标签名命中 → 这些标签下的文章 id（去重并限长） */
-    private List<Long> articleIdsByTagKeyword(String keyword) {
-        List<Tag> tags = tagMapper.selectList(
-                new LambdaQueryWrapper<Tag>().like(Tag::getName, keyword));
-        if (tags == null || tags.isEmpty()) {
-            return List.of();
-        }
-        List<Long> tagIds = tags.stream().map(Tag::getId).filter(Objects::nonNull)
-                .distinct().limit(SEARCH_RELATION_ID_LIMIT).toList();
-        if (tagIds.isEmpty()) {
-            return List.of();
-        }
-        List<ArticleTag> links = articleTagMapper.selectList(
-                new LambdaQueryWrapper<ArticleTag>().in(ArticleTag::getTagId, tagIds));
-        if (links == null || links.isEmpty()) {
-            return List.of();
-        }
-        return links.stream()
-                .map(ArticleTag::getArticleId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .limit(SEARCH_RELATION_ID_LIMIT)
-                .toList();
-    }
-
-    /** 分类名命中 → 这些分类的 id（去重并限长） */
-    private List<Long> categoryIdsByKeyword(String keyword) {
-        List<Category> categories = categoryMapper.selectList(
-                new LambdaQueryWrapper<Category>().like(Category::getName, keyword));
-        if (categories == null || categories.isEmpty()) {
-            return List.of();
-        }
-        return categories.stream()
-                .map(Category::getId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .limit(SEARCH_RELATION_ID_LIMIT)
-                .toList();
+        String pattern = "%" + keyword + "%";
+        wrapper.and(w -> w.like(Article::getTitle, keyword)
+                .or().like(Article::getSummary, keyword)
+                .or().exists("SELECT 1 FROM category c WHERE c.id=article.category_id AND c.name LIKE {0}", pattern)
+                .or().exists("SELECT 1 FROM article_tag atg JOIN tag t ON t.id=atg.tag_id "
+                        + "WHERE atg.article_id=article.id AND t.name LIKE {0}", pattern));
     }
 
     public Page<Article> adminPage(int pageNum, int pageSize, String keyword, Integer status, Long categoryId) {
@@ -247,30 +174,23 @@ public class ArticleService {
                 Article::getCommentCount, Article::getLikeCount, Article::getWordCount,
                 Article::getIsDeleted,
                 Article::getCreateTime, Article::getUpdateTime);
-        return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+        return articleMapper.selectPage(new Page<>(Math.max(1, pageNum), Math.max(1, Math.min(100, pageSize))), wrapper);
     }
 
+    @Transactional
     public Article getPublicById(Long id) {
         return getPublicById(id, true);
     }
 
-    /**
-     * 取前台文章详情。
-     *
-     * @param countView 是否计入阅读数。
-     *                  <p>页面 HTML 上了 routeRules 缓存之后，同一个 URL 在缓存窗口内只会渲染一次，
-     *                  如果还按「每次 GET 都 +1」，缓存命中期间的阅读就全丢了。
-     *                  所以服务端渲染那条路径传 false（只读展示值），改由浏览器挂载后调
-     *                  {@code POST /api/article/{id}/view} 单独打点 —— 这样缓存命中/未命中都是一次访问记一次。
-     *                  App 等直接调接口的客户端不认这个约定，仍走 true，行为与之前一致。
-     */
+    /** 正文直接读取已提交的文章状态，撤稿后的公开请求不能命中旧正文。 */
+    @Transactional
     public Article getPublicById(Long id, boolean countView) {
-        Article article = loadPublicArticle(id);
+        Article article = articleMapper.selectById(id);
+        if (article == null || !isPublicArticle(article)) {
+            throw new BusinessException(404, "文章不存在");
+        }
         if (countView) {
-            applyViewCount(id, article);
-        } else {
-            // 只读：把「缓存里的基准值 + 窗口内增量」算出来展示，不写库也不自增
-            article.setViewCount(currentViewCount(id, article.getViewCount()));
+            article.setViewCount(incrementViewCount(id));
         }
         return article;
     }
@@ -294,98 +214,17 @@ public class ArticleService {
         return article;
     }
 
-    /**
-     * 缓存优先地取一篇公开文章（不含阅读数逻辑）。
-     * <p>
-     * Redis 故障不能拖垮阅读：读缓存失败就回源数据库，写缓存失败只丢缓存不丢请求。
-     * 聚合缓存（archive / series）一直有这个兜底，详情链路 2026-11-23 才补齐 ——
-     * 在此之前 Redis 一挂，所有文章详情直接 500，而数据库其实好好的。
-     */
-    private Article loadPublicArticle(Long id) {
-        String key = ArticleCacheKeys.article(id);
-        Article cached = null;
-        try {
-            cached = (Article) redisTemplate.opsForValue().get(key);
-        } catch (Exception e) {
-            log.warn("[文章详情] 缓存读取失败，回源数据库 id={}: {}", id, e.toString());
-        }
-        if (cached != null) {
-            if (!isPublicArticle(cached)) {
-                try {
-                    redisTemplate.delete(key);
-                } catch (Exception ignored) {
-                    // 缓存删不掉不影响判定：下面照样按 404 处理
-                }
-                throw new BusinessException(404, "文章不存在");
-            }
-            return cached;
-        }
-        Article article = articleMapper.selectById(id);
-        if (article == null || !isPublicArticle(article)) {
-            throw new BusinessException(404, "文章不存在");
-        }
-        try {
-            redisTemplate.opsForValue().set(key, article, ArticleCacheKeys.ARTICLE_TTL);
-            redisTemplate.opsForValue().set(ArticleCacheKeys.viewCount(id), 0,
-                    ArticleCacheKeys.ARTICLE_TTL);
-        } catch (Exception e) {
-            log.warn("[文章详情] 缓存写入失败，本次不回填 id={}: {}", id, e.toString());
-        }
-        return article;
-    }
-
-    /**
-     * 阅读数 +1，并把自增后的值写回传入的 article。
-     * <p>
-     * ⚠️ 以前是「DB 值 + Redis 窗口增量」，那是重复计数：
-     * 传进来的 article 来自 selectById，是**自增前的**最新 DB 值，
-     * 再从 key 创建起累计一个 delta 加上去，同一段时间被数了两遍。
-     * 具体表现（DB=1000，10 分钟内访问 20 次）：第 20 次显示 1019，实际 1020。
-     * 而且 ARTICLE_TTL 到期 delta 归零，阅读数会往回跳 —— 用户能看见。
-     * <p>
-     * 正确的口径：selectById 读到的是自增前的值，+1 就是自增后的值。
-     * Redis 计数器仍然要自增，但只服务于 {@link #currentViewCount} ——
-     * 那条走的是缓存快照 base + 窗口增量，口径本身是对的。
-     * <p>
-     * 已知代价：并发下两个请求读到同一个 base，显示会少 1（DB 侧仍准确）。
-     * 要绝对准确得在自增后回查一次单列，个人博客不值得多这一次查询。
-     */
-    private void applyViewCount(Long id, Article article) {
-        Integer before = article.getViewCount();
-        // 持久化：单条主键 UPDATE 原子自增（数据库始终是浏览量的真实来源）
-        articleMapper.update(null, new LambdaUpdateWrapper<Article>()
-                .eq(Article::getId, id)
-                .setSql("view_count = IFNULL(view_count, 0) + 1"));
-        // Redis 计数器照常自增：currentViewCount 靠它给缓存快照算增量，断了那边就静止
-        redisTemplate.opsForValue().increment(ArticleCacheKeys.viewCount(id));
-        article.setViewCount((before == null ? 0 : before) + 1);
-    }
-
-    /** 只读地算出当前展示值（基准值 + Redis 窗口增量），不写库、不自增 */
-    private int currentViewCount(Long id, Integer base) {
-        int value = base == null ? 0 : base;
-        try {
-            Object delta = redisTemplate.opsForValue().get(ArticleCacheKeys.viewCount(id));
-            if (delta instanceof Number n) {
-                return value + n.intValue();
-            }
-        } catch (Exception ignored) {
-            // Redis 故障时退回基准值，不影响详情可用性
-        }
-        return value;
-    }
-
-    /**
-     * 阅读数打点（浏览器侧调用）。
-     * 返回最新阅读数，前端可以就地刷新数字而不用整页重载。
-     */
+    /** 公开状态、原子自增和最新计数都由数据库确认。 */
+    @Transactional
     public int incrementViewCount(Long id) {
-        Article article = articleMapper.selectById(id);
-        if (article == null || !isPublicArticle(article)) {
+        if (articleMapper.incrementPublicViews(id) == 0) {
             throw new BusinessException(404, "文章不存在");
         }
-        applyViewCount(id, article);
-        return article.getViewCount() == null ? 0 : article.getViewCount();
+        Integer count = articleMapper.publishedViewCount(id);
+        if (count == null) {
+            throw new BusinessException(404, "文章不存在");
+        }
+        return count;
     }
 
     public Article getAdminById(Long id) {
@@ -397,7 +236,8 @@ public class ArticleService {
     }
 
     private boolean isPublicArticle(Article article) {
-        return article.getStatus() != null && article.getStatus() == 1;
+        return Integer.valueOf(STATUS_PUBLISHED).equals(article.getStatus())
+                && !Integer.valueOf(1).equals(article.getIsDeleted());
     }
 
     // =================================================================
@@ -474,6 +314,7 @@ public class ArticleService {
 
         syncTags(article.getId(), dto.getTagIds());
         adjustCategoryCount(categoryId, 1);
+        attachSavedVersion(article);
         return article;
     }
 
@@ -486,11 +327,12 @@ public class ArticleService {
      */
     @Transactional
     public Article update(Long id, ArticleDTO dto, Long editorId, boolean autosave) {
-        Article article = articleMapper.selectById(id);
+        Article article = articleMapper.lockForEdit(id);
         if (article == null) {
             throw new BusinessException("文章不存在");
         }
         // 原状态要在 applyPublishSchedule 覆盖之前抓住 —— 它决定「这次改动是不是审核流程的一部分」
+        checkEditVersion(article, dto.getEditVersion());
         Integer originalStatus = article.getStatus();
         String oldTitle = article.getTitle();
         Long oldCategoryId = article.getCategoryId();
@@ -503,13 +345,13 @@ public class ArticleService {
 
         article.setTitle(dto.getTitle());
         article.setContentMd(nextContent);
-        article.setContentHtml(dto.getContentHtml());
-        article.setSummary(dto.getSummary());
-        article.setCover(dto.getCover());
+        if (dto.getContentHtml() != null) article.setContentHtml(dto.getContentHtml());
+        if (dto.getSummary() != null) article.setSummary(dto.getSummary());
+        if (dto.getCover() != null) article.setCover(dto.getCover());
         // 同 create：清空分类也归入「未建档文章」，而不是留一个 null
         Long nextCategoryId = dto.getCategoryId() != null ? dto.getCategoryId() : defaultCategoryId();
         article.setCategoryId(nextCategoryId);
-        article.setSeries(dto.getSeries());
+        if (dto.getSeries() != null) article.setSeries(dto.getSeries());
         article.setWordCount(WordCounter.count(nextContent));
         if (dto.getIsTop() != null) {
             article.setIsTop(dto.getIsTop());
@@ -546,20 +388,9 @@ public class ArticleService {
         requireContentWhenPublished(article);
 
         try {
-            articleMapper.updateById(article);
+            articleMapper.saveEditedFields(article);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(400, "别名已被占用，请换一个自定义 URL 后重试");
-        }
-        // ⚠️ publishAt 需要被清空时（撤下、取消定时、转纯草稿），上面那条 updateById
-        // 根本不会写它：MyBatis-Plus 默认更新策略是 NOT_NULL，实体里为 null 的字段
-        // 直接不进 SET 子句。结果是数据库里 publish_at 还留着原值，而
-        // ScheduledPublishJob 的条件正是「status=0 且 publish_at <= now()」——
-        // 一篇刚撤下的文章会在下一分钟被它重新公开（2026-11-23 修）。
-        // 只能用显式 SQL 置空（setSql 而不是 set(..., null)，后者依赖包装行为，容易看走眼）。
-        if (article.getPublishAt() == null) {
-            articleMapper.update(null, new LambdaUpdateWrapper<Article>()
-                    .eq(Article::getId, id)
-                    .setSql("publish_at = NULL"));
         }
 
         syncTags(id, dto.getTagIds());
@@ -567,7 +398,7 @@ public class ArticleService {
             adjustCategoryCount(oldCategoryId, -1);
             adjustCategoryCount(nextCategoryId, 1);
         }
-        evictArticleCache(id);
+        attachSavedVersion(article);
         return article;
     }
 
@@ -610,7 +441,7 @@ public class ArticleService {
                         Article::getCover, Article::getStatus, Article::getRejectReason,
                         Article::getPublishAt, Article::getCategoryId, Article::getWordCount,
                         Article::getViewCount, Article::getCreateTime, Article::getUpdateTime);
-        return articleMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+        return articleMapper.selectPage(new Page<>(Math.max(1, pageNum), Math.max(1, Math.min(100, pageSize))), wrapper);
     }
 
     /** 作者读自己的某一篇（编辑页回填正文）。不属于自己一律拒绝，避免"能读别人的草稿"。 */
@@ -672,6 +503,7 @@ public class ArticleService {
         }
         syncTags(article.getId(), dto.getTagIds());
         adjustCategoryCount(article.getCategoryId(), 1);
+        attachSavedVersion(article);
         return article;
     }
 
@@ -691,7 +523,7 @@ public class ArticleService {
      */
     @Transactional
     public Article updateForAuthor(Long id, AuthorArticleDTO dto, Long userId, boolean submit) {
-        Article article = articleMapper.selectById(id);
+        Article article = articleMapper.lockForEdit(id);
         if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
             throw new BusinessException(404, "文章不存在");
         }
@@ -701,6 +533,7 @@ public class ArticleService {
             throw new BusinessException(403, "这不是你的文章，无权修改");
         }
 
+        checkEditVersion(article, dto.getEditVersion());
         int current = article.getStatus() == null ? STATUS_DRAFT : article.getStatus();
         String oldTitle = article.getTitle();
         Long oldCategoryId = article.getCategoryId();
@@ -716,8 +549,8 @@ public class ArticleService {
 
         article.setTitle(dto.getTitle());
         article.setContentMd(nextContent);
-        article.setSummary(dto.getSummary());
-        article.setCover(dto.getCover());
+        if (dto.getSummary() != null) article.setSummary(dto.getSummary());
+        if (dto.getCover() != null) article.setCover(dto.getCover());
         Long nextCategoryId = dto.getCategoryId() != null ? dto.getCategoryId() : defaultCategoryId();
         article.setCategoryId(nextCategoryId);
         article.setWordCount(WordCounter.count(nextContent));
@@ -745,7 +578,7 @@ public class ArticleService {
         }
 
         try {
-            articleMapper.updateById(article);
+            articleMapper.saveEditedFields(article);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(400, "别名已被占用，请换一个自定义 URL 后重试");
         }
@@ -754,7 +587,7 @@ public class ArticleService {
             adjustCategoryCount(oldCategoryId, -1);
             adjustCategoryCount(nextCategoryId, 1);
         }
-        evictArticleCache(id);
+        attachSavedVersion(article);
         return article;
     }
 
@@ -764,7 +597,7 @@ public class ArticleService {
      */
     @Transactional
     public void deleteForAuthor(Long id, Long userId) {
-        Article article = articleMapper.selectById(id);
+        Article article = articleMapper.lockForEdit(id);
         if (article == null || Integer.valueOf(1).equals(article.getIsDeleted())) {
             throw new BusinessException(404, "文章不存在");
         }
@@ -793,8 +626,7 @@ public class ArticleService {
         patch.setStatus(STATUS_PUBLISHED);
         patch.setPublishAt(LocalDateTime.now());
         patch.setRejectReason("");
-        articleMapper.updateById(patch);
-        evictArticleCache(id);
+        updatePending(id, patch);
         return articleMapper.selectById(id);
     }
 
@@ -819,20 +651,27 @@ public class ArticleService {
         patch.setId(id);
         patch.setStatus(STATUS_REJECTED);
         patch.setRejectReason(text);
-        articleMapper.updateById(patch);
+        updatePending(id, patch);
         return articleMapper.selectById(id);
+    }
+
+    private void updatePending(Long id, Article patch) {
+        int changed = articleMapper.update(patch, new LambdaUpdateWrapper<Article>()
+                .eq(Article::getId, id).eq(Article::getStatus, STATUS_PENDING));
+        if (changed == 0) {
+            throw new BusinessException(409, "稿件已被处理，请刷新审核列表");
+        }
     }
 
     /** 软删除（进回收站）。刻意保留 article_tag：从回收站恢复时标签才跟着回来。 */
     @Transactional
     public void delete(Long id) {
-        Article article = articleMapper.selectById(id);
+        Article article = articleMapper.lockForEdit(id);
         if (article == null) {
             throw new BusinessException(404, "文章不存在");
         }
         articleMapper.deleteById(id);
         adjustCategoryCount(article.getCategoryId(), -1);
-        evictArticleCache(id);
     }
 
     /**
@@ -857,7 +696,6 @@ public class ArticleService {
         patch.setId(id);
         patch.setIsFeatured(Integer.valueOf(1).equals(featured) ? 1 : 0);
         articleMapper.updateById(patch);
-        evictArticleCache(id);
         article.setIsFeatured(patch.getIsFeatured());
         return article;
     }
@@ -894,7 +732,6 @@ public class ArticleService {
         }
         Article restored = articleMapper.selectById(id);
         adjustCategoryCount(restored == null ? null : restored.getCategoryId(), 1);
-        evictArticleCache(id);
     }
 
     /** 彻底删除：物理删行，同时清掉标签关联与版本快照，避免留下永久孤儿数据 */
@@ -911,10 +748,11 @@ public class ArticleService {
             }
             throw new BusinessException(404, "文章不存在");
         }
+        articleMapper.deleteCommentReports(id);
+        articleMapper.deleteComments(id);
         articleTagMapper.delete(new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getArticleId, id));
         articleRevisionMapper.delete(new LambdaQueryWrapper<ArticleRevision>()
                 .eq(ArticleRevision::getArticleId, id));
-        evictArticleCache(id);
     }
 
     // =================================================================
@@ -942,7 +780,7 @@ public class ArticleService {
      */
     @Transactional
     public Article restoreRevision(Long articleId, Long revisionId, Long editorId) {
-        Article article = articleMapper.selectById(articleId);
+        Article article = articleMapper.lockForEdit(articleId);
         if (article == null) {
             throw new BusinessException(404, "文章不存在");
         }
@@ -961,13 +799,12 @@ public class ArticleService {
         article.setCategoryId(restoredCategoryId);
         article.setSeries(revision.getSeries());
         article.setWordCount(WordCounter.count(revision.getContentMd()));
-        articleMapper.updateById(article);
+        articleMapper.saveEditedFields(article);
 
         if (!Objects.equals(oldCategoryId, restoredCategoryId)) {
             adjustCategoryCount(oldCategoryId, -1);
             adjustCategoryCount(restoredCategoryId, 1);
         }
-        evictArticleCache(articleId);
         return article;
     }
 
@@ -1029,25 +866,31 @@ public class ArticleService {
      */
     @Transactional
     public int promoteScheduledArticles() {
+        LocalDateTime now = LocalDateTime.now();
         List<Article> due = articleMapper.selectList(new LambdaQueryWrapper<Article>()
-                .select(Article::getId)
-                .eq(Article::getStatus, 0)
+                .select(Article::getId, Article::getPublishAt)
+                .eq(Article::getStatus, STATUS_DRAFT)
                 .eq(Article::getIsDeleted, 0)
-                .isNotNull(Article::getPublishAt)
-                .le(Article::getPublishAt, LocalDateTime.now()));
-        if (due.isEmpty()) {
-            return 0;
+                .le(Article::getPublishAt, now));
+        int promoted = 0;
+        for (Article article : due) {
+            promoted += articleMapper.update(null, new LambdaUpdateWrapper<Article>()
+                    .eq(Article::getId, article.getId())
+                    .eq(Article::getStatus, STATUS_DRAFT)
+                    .eq(Article::getIsDeleted, 0)
+                    .eq(Article::getPublishAt, article.getPublishAt())
+                    .set(Article::getStatus, STATUS_PUBLISHED));
         }
-        for (Article a : due) {
-            // 只翻状态，**不清 publish_at**：它就是这篇文章的发布时间，
-            // 热力图与卡片日期都靠它（清掉会退回 create_time，等于定时发布的时间白选了）。
-            articleMapper.update(null, new LambdaUpdateWrapper<Article>()
-                    .eq(Article::getId, a.getId())
-                    .set(Article::getStatus, 1));
-            evictArticleCache(a.getId());
+        if (promoted > 0) {
+            afterCommit(() -> {
+                try {
+                    redisTemplate.delete(List.of(ArticleCacheKeys.ARCHIVE, ArticleCacheKeys.SERIES));
+                } catch (RuntimeException e) {
+                    log.warn("定时发布已提交，归档缓存清理失败", e);
+                }
+            });
         }
-        redisTemplate.delete(List.of(ArticleCacheKeys.ARCHIVE, ArticleCacheKeys.SERIES));
-        return due.size();
+        return promoted;
     }
 
     // =================================================================
@@ -1166,7 +1009,7 @@ public class ArticleService {
     private LambdaQueryWrapper<Article> recommendBase() {
         return new LambdaQueryWrapper<Article>()
                 .select(Article::getId, Article::getTitle, Article::getSlug, Article::getCover,
-                        Article::getSummary, Article::getViewCount, Article::getCreateTime)
+                        Article::getSummary, Article::getViewCount, Article::getCreateTime, Article::getPublishAt)
                 .eq(Article::getStatus, 1)
                 .eq(Article::getIsDeleted, 0);
     }
@@ -1182,7 +1025,7 @@ public class ArticleService {
     public List<Article> related(Long id) {
         Article article = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
                 .select(Article::getId, Article::getCategoryId)
-                .eq(Article::getId, id));
+                .eq(Article::getId, id).eq(Article::getStatus, STATUS_PUBLISHED));
         if (article == null) {
             return List.of();
         }
@@ -1192,8 +1035,7 @@ public class ArticleService {
             result.addAll(articleMapper.selectList(recommendBase()
                     .eq(Article::getCategoryId, article.getCategoryId())
                     .ne(Article::getId, id)
-                    .orderByDesc(Article::getCreateTime)
-                    .last("LIMIT " + RELATED_SIZE)));
+                    .last("ORDER BY " + ArticleMapper.PUBLICATION_TIME + " DESC, id DESC LIMIT " + RELATED_SIZE)));
         }
 
         if (result.size() < RELATED_SIZE) {
@@ -1204,49 +1046,40 @@ public class ArticleService {
             }
             result.addAll(articleMapper.selectList(recommendBase()
                     .notIn(Article::getId, excludeIds)
-                    .orderByDesc(Article::getCreateTime)
-                    .last("LIMIT " + (RELATED_SIZE - result.size()))));
+                    .last("ORDER BY " + ArticleMapper.PUBLICATION_TIME + " DESC, id DESC LIMIT " + (RELATED_SIZE - result.size()))));
         }
         return result;
     }
 
     /**
-     * 相邻文章。列表顺序为 is_top DESC, create_time DESC, id DESC（id 作为同秒创建的兜底排序）。
-     * 用两次走索引的单行查询，替代前端原先「拉 100 篇全文到客户端再算下标」的做法（待办第 35 条）。
+     * 相邻文章按公开列表同一优先级排序：置顶、发布时间、ID。历史文章以创建时间补齐。
      */
     public Map<String, Object> neighbors(Long id) {
         Article current = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
-                .select(Article::getId, Article::getIsTop, Article::getCreateTime)
-                .eq(Article::getId, id));
+                .select(Article::getId, Article::getIsTop, Article::getPublishAt, Article::getCreateTime)
+                .eq(Article::getId, id).eq(Article::getStatus, STATUS_PUBLISHED));
         Map<String, Object> result = new HashMap<>();
-        if (current == null || current.getCreateTime() == null) {
-            return result;
-        }
+        if (current == null) return result;
+        LocalDateTime date = current.getPublishAt() != null ? current.getPublishAt() : current.getCreateTime();
+        if (date == null) return result;
         int top = current.getIsTop() == null ? 0 : current.getIsTop();
-        // 上一篇：排序中更靠前的一篇
-        Article prev = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
-                .select(Article::getId, Article::getTitle, Article::getSlug)
-                .eq(Article::getStatus, 1)
-                .eq(Article::getIsDeleted, 0)
-                .and(w -> w.gt(Article::getIsTop, top)
-                        .or(w2 -> w2.eq(Article::getIsTop, top).gt(Article::getCreateTime, current.getCreateTime()))
-                        .or(w3 -> w3.eq(Article::getIsTop, top).eq(Article::getCreateTime, current.getCreateTime()).gt(Article::getId, id)))
-                .orderByAsc(Article::getIsTop).orderByAsc(Article::getCreateTime).orderByAsc(Article::getId)
-                .last("LIMIT 1"));
-        // 下一篇：排序中更靠后的一篇
-        Article next = articleMapper.selectOne(new LambdaQueryWrapper<Article>()
-                .select(Article::getId, Article::getTitle, Article::getSlug)
-                .eq(Article::getStatus, 1)
-                .eq(Article::getIsDeleted, 0)
-                .and(w -> w.lt(Article::getIsTop, top)
-                        .or(w2 -> w2.eq(Article::getIsTop, top).lt(Article::getCreateTime, current.getCreateTime()))
-                        .or(w3 -> w3.eq(Article::getIsTop, top).eq(Article::getCreateTime, current.getCreateTime()).lt(Article::getId, id)))
-                .orderByDesc(Article::getIsTop).orderByDesc(Article::getCreateTime).orderByDesc(Article::getId)
-                .last("LIMIT 1"));
-        result.put("prev", prev);
-        result.put("next", next);
+        String tuple = "(COALESCE(is_top, 0), " + ArticleMapper.PUBLICATION_TIME + ", id)";
+        String order = "COALESCE(is_top, 0)";
+        result.put("prev", articleMapper.selectOne(neighborFields()
+                .apply(tuple + " > ({0},{1},{2})", top, date, id)
+                .last("ORDER BY " + order + " ASC, " + ArticleMapper.PUBLICATION_TIME + " ASC, id ASC LIMIT 1")));
+        result.put("next", articleMapper.selectOne(neighborFields()
+                .apply(tuple + " < ({0},{1},{2})", top, date, id)
+                .last("ORDER BY " + order + " DESC, " + ArticleMapper.PUBLICATION_TIME + " DESC, id DESC LIMIT 1")));
         return result;
     }
+
+    private LambdaQueryWrapper<Article> neighborFields() {
+        return new LambdaQueryWrapper<Article>()
+                .select(Article::getId, Article::getTitle, Article::getSlug)
+                .eq(Article::getStatus, STATUS_PUBLISHED);
+    }
+
 
     // =================================================================
     // 导入 / 导出
@@ -1547,7 +1380,9 @@ public class ArticleService {
                                 + "请让超管在「投稿审核」里处理，或你先保存草稿。");
             }
             article.setStatus(STATUS_PUBLISHED);
-            article.setPublishAt(publishAt != null ? publishAt : LocalDateTime.now());
+            if (publishAt != null || !Integer.valueOf(STATUS_PUBLISHED).equals(originalStatus)) {
+                article.setPublishAt(publishAt != null ? publishAt : LocalDateTime.now());
+            }
             return;
         }
 
@@ -1594,17 +1429,55 @@ public class ArticleService {
     }
 
     /** 允许存空草稿，但不允许把空文章发出去 */
-    private void requireContentWhenPublished(Article article) {        if (article.getStatus() != null && article.getStatus() == 1
+    private void requireContentWhenPublished(Article article) {
+        boolean scheduled = Integer.valueOf(STATUS_DRAFT).equals(article.getStatus()) && article.getPublishAt() != null;
+        if ((Integer.valueOf(STATUS_PUBLISHED).equals(article.getStatus()) || scheduled)
                 && StrUtil.isBlank(article.getContentMd())) {
             throw new BusinessException(400, "发布前请先填写正文；如果还没写完，可以先「保存草稿」");
         }
     }
 
-    private void evictArticleCache(Long id) {
+    /** 编辑版本覆盖内容、发布状态、版式和标签。浏览、点赞和评论不产生编辑冲突。 */
+    public void attachEditVersion(Article article, List<Tag> tags) {
+        List<Long> ids = tags.stream().map(Tag::getId).sorted().toList();
         try {
-            redisTemplate.delete(ArticleCacheKeys.article(id));
-        } catch (Exception ignored) {
-            // 缓存清理失败等待 TTL 自然过期，不影响主流程
+            MessageDigest hash = MessageDigest.getInstance("SHA-256");
+            Object[] values = {article.getTitle(), article.getSlug(), article.getContentMd(), article.getContentHtml(),
+                    article.getSummary(), article.getCover(), article.getCategoryId(), article.getSeries(),
+                    article.getStatus(), article.getPublishAt(), article.getRejectReason(), article.getIsTop(),
+                    article.getIsFeatured(), ids};
+            for (Object value : values) {
+                if (value == null) {
+                    hash.update((byte) 0);
+                } else {
+                    byte[] bytes = value.toString().getBytes(StandardCharsets.UTF_8);
+                    hash.update((byte) 1);
+                    hash.update(Integer.toString(bytes.length).getBytes(StandardCharsets.US_ASCII));
+                    hash.update((byte) ':');
+                    hash.update(bytes);
+                }
+            }
+            article.setEditVersion(HexFormat.of().formatHex(hash.digest()));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void checkEditVersion(Article current, String expected) {
+        if (expected == null) return;
+        attachEditVersion(current, getTagsByArticleId(current.getId()));
+        if (!expected.equals(current.getEditVersion())) {
+            throw new BusinessException(409, "文章已被修改，请保留本地草稿并重新载入最新版本");
+        }
+    }
+
+    private void attachSavedVersion(Article saved) {
+        if (saved.getId() == null) return;
+        // 时间精度、默认值和有效标签要以实际持久化的值为准。
+        Article stored = articleMapper.selectById(saved.getId());
+        if (stored != null) {
+            attachEditVersion(stored, getTagsByArticleId(saved.getId()));
+            saved.setEditVersion(stored.getEditVersion());
         }
     }
 
@@ -1612,12 +1485,8 @@ public class ArticleService {
         if (categoryId == null) {
             return;
         }
-        Category category = categoryMapper.selectById(categoryId);
-        if (category == null) {
-            return;
-        }
-        int current = category.getArticleCount() == null ? 0 : category.getArticleCount();
-        category.setArticleCount(Math.max(0, current + delta));
-        categoryMapper.updateById(category);
+        categoryMapper.update(null, new LambdaUpdateWrapper<Category>()
+                .eq(Category::getId, categoryId)
+                .setSql("article_count = GREATEST(0, COALESCE(article_count, 0) + {0})", delta));
     }
 }

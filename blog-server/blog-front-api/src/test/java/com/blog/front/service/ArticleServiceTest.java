@@ -23,7 +23,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -82,12 +81,6 @@ class ArticleServiceTest {
                 articleTagMapper, articleRevisionMapper, redisTemplate, ragIndexClient);
     }
 
-    @SuppressWarnings("unchecked")
-    private void mockCacheMiss() {
-        ValueOperations<String, Object> valueOps = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-    }
-
     private Article article(Long id, int status) {
         Article article = new Article();
         article.setId(id);
@@ -98,9 +91,12 @@ class ArticleServiceTest {
     // ---------------- 列表 / 详情（既有行为） ----------------
 
     @Test
-    void page_timeSort_defaultsToCreateTimeDesc() {
+    void page_timeSort_usesPublishedDateWithStableId() {
         ArticleService s = service();
-        assertDoesNotThrow(() -> s.page(1, 10, null, null, null, null, "time"));
+        s.page(1, 10, null, null, null, null, "time");
+        ArgumentCaptor<Wrapper<Article>> query = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleMapper).selectPage(any(), query.capture());
+        assertTrue(query.getValue().getSqlSegment().contains("COALESCE(publish_at, create_time) DESC, id DESC"));
     }
 
     @Test
@@ -123,14 +119,12 @@ class ArticleServiceTest {
 
     @Test
     void getPublicById_throwsWhenMissing() {
-        mockCacheMiss();
         ArticleService s = service();
         assertThrows(BusinessException.class, () -> s.getPublicById(999L));
     }
 
     @Test
     void getPublicById_throwsWhenDraft() {
-        mockCacheMiss();
         when(articleMapper.selectById(1L)).thenReturn(article(1L, 0));
         ArticleService s = service();
         assertThrows(BusinessException.class, () -> s.getPublicById(1L));
@@ -140,7 +134,6 @@ class ArticleServiceTest {
 
     @Test
     void getPublicById_ssrRequest_doesNotCountView() {
-        mockCacheMiss();
         Article published = article(1L, 1);
         published.setViewCount(10);
         when(articleMapper.selectById(1L)).thenReturn(published);
@@ -149,14 +142,14 @@ class ArticleServiceTest {
         Article out = s.getPublicById(1L, false);
 
         assertEquals(10, out.getViewCount(), "SSR 渲染不应把阅读数算进去");
-        verify(articleMapper, org.mockito.Mockito.never()).update(any(), any());
+        verify(articleMapper, never()).incrementPublicViews(any());
     }
 
     @Test
     void getPublicById_browserRequest_countsView() {
-        mockCacheMiss();
         // 真实 Redis 的 increment 返回自增后的值（从 1 开始），这里如实模拟
-        when(redisTemplate.opsForValue().increment(anyString())).thenReturn(1L);
+        when(articleMapper.incrementPublicViews(1L)).thenReturn(1);
+        when(articleMapper.publishedViewCount(1L)).thenReturn(11);
         Article published = article(1L, 1);
         published.setViewCount(10);
         when(articleMapper.selectById(1L)).thenReturn(published);
@@ -165,29 +158,25 @@ class ArticleServiceTest {
         Article out = s.getPublicById(1L, true);
 
         assertEquals(11, out.getViewCount(), "基准 10 + 本次增量 1");
-        verify(articleMapper).update(any(), any());
+        verify(articleMapper).incrementPublicViews(1L);
     }
 
     @Test
     void incrementViewCount_returnsLatestCount() {
-        mockCacheMiss();
-        when(redisTemplate.opsForValue().increment(anyString())).thenReturn(1L);
-        Article published = article(2L, 1);
-        published.setViewCount(null);
-        when(articleMapper.selectById(2L)).thenReturn(published);
+        when(articleMapper.incrementPublicViews(2L)).thenReturn(1);
+        when(articleMapper.publishedViewCount(2L)).thenReturn(1);
         ArticleService s = service();
 
         assertEquals(1, s.incrementViewCount(2L), "阅读数为空时应从 0 开始算");
-        verify(articleMapper).update(any(), any());
+        verify(articleMapper).incrementPublicViews(2L);
     }
 
     @Test
     void incrementViewCount_draft_throws404() {
-        when(articleMapper.selectById(3L)).thenReturn(article(3L, 0));
         ArticleService s = service();
         BusinessException ex = assertThrows(BusinessException.class, () -> s.incrementViewCount(3L));
         assertEquals(404, ex.getCode());
-        verify(articleMapper, org.mockito.Mockito.never()).update(any(), any());
+        verify(articleMapper, never()).publishedViewCount(any());
     }
 
     @Test
@@ -235,24 +224,6 @@ class ArticleServiceTest {
     @SuppressWarnings("unchecked")
     @Test
     void page_keyword_matchesTitleSummaryTagAndCategory() {
-        // 标签名命中「Java」→ 关联文章 11、12
-        Tag javaTag = new Tag();
-        javaTag.setId(7L);
-        javaTag.setName("Java");
-        when(tagMapper.selectList(any())).thenReturn(List.of(javaTag));
-        ArticleTag link1 = new ArticleTag();
-        link1.setArticleId(11L);
-        link1.setTagId(7L);
-        ArticleTag link2 = new ArticleTag();
-        link2.setArticleId(12L);
-        link2.setTagId(7L);
-        when(articleTagMapper.selectList(any())).thenReturn(List.of(link1, link2));
-        // 分类名命中「Java」→ 分类 3
-        Category javaCategory = new Category();
-        javaCategory.setId(3L);
-        javaCategory.setName("Java");
-        when(categoryMapper.selectList(any())).thenReturn(List.of(javaCategory));
-
         ArticleService s = service();
         ArgumentCaptor<Wrapper<Article>> captor = ArgumentCaptor.forClass(Wrapper.class);
         when(articleMapper.selectPage(any(), captor.capture())).thenReturn(new Page<>());
@@ -263,7 +234,7 @@ class ArticleServiceTest {
         assertTrue(sql.contains("title"), "标题仍应参与匹配");
         assertTrue(sql.contains("summary"), "摘要也应参与匹配（正文太长，不进 LIKE）");
         assertTrue(sql.contains("category_id"), "分类名命中应并入查询");
-        assertTrue(sql.contains("OR id IN"), "标签名命中应并入查询");
+        assertTrue(sql.contains("JOIN tag") && sql.contains("t.name LIKE"), "标签查询应在数据库中完成，避免截断");
     }
 
     @SuppressWarnings("unchecked")
@@ -277,7 +248,7 @@ class ArticleServiceTest {
 
         // 标签 / 分类都没命中时，关键词只剩标题 + 摘要
         String sql = captor.getValue().getSqlSegment();
-        assertFalse(sql.contains("category_id"), "没有分类命中时不应拼 category_id 条件");
+        assertTrue(sql.contains("EXISTS"), "分类和标签用参数化子查询参与匹配");
         assertTrue(sql.contains("summary"));
 
         // 关键结构：status / is_deleted 必须在关键词分组之前。
@@ -346,7 +317,7 @@ class ArticleServiceTest {
         existing.setTitle("旧标题");
         existing.setSlug("old-slug");
         existing.setContentMd("正文");
-        when(articleMapper.selectById(5L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(5L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("新标题");
@@ -369,7 +340,7 @@ class ArticleServiceTest {
         existing.setTitle("旧标题");
         existing.setSlug("old-slug");
         existing.setContentMd("正文");
-        when(articleMapper.selectById(6L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(6L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("新标题");
@@ -385,7 +356,7 @@ class ArticleServiceTest {
 
     private Article capturedUpdate() {
         ArgumentCaptor<Article> captor = ArgumentCaptor.forClass(Article.class);
-        verify(articleMapper).updateById(captor.capture());
+        verify(articleMapper).saveEditedFields(captor.capture());
         return captor.getValue();
     }
 
@@ -399,7 +370,7 @@ class ArticleServiceTest {
         existing.setTitle("标题");
         existing.setSlug("s");
         existing.setContentMd("内容没变");
-        when(articleMapper.selectById(7L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(7L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("标题");
@@ -421,7 +392,7 @@ class ArticleServiceTest {
         existing.setTitle("标题");
         existing.setSlug("s");
         existing.setContentMd("旧内容");
-        when(articleMapper.selectById(8L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(8L)).thenReturn(existing);
         // 刚刚才存过快照 → 自动保存应当被节流住
         when(articleRevisionMapper.selectLatestTime(8L)).thenReturn(LocalDateTime.now().minusMinutes(1));
 
@@ -445,7 +416,7 @@ class ArticleServiceTest {
         existing.setTitle("标题");
         existing.setSlug("s");
         existing.setContentMd("旧内容");
-        when(articleMapper.selectById(9L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(9L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("标题");
@@ -784,7 +755,7 @@ class ArticleServiceTest {
         existing.setId(5L);
         existing.setUserId(1L);
         existing.setStatus(ArticleService.STATUS_DRAFT);
-        when(articleMapper.selectById(5L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(5L)).thenReturn(existing);
 
         AuthorArticleDTO dto = new AuthorArticleDTO();
         dto.setTitle("改别人的文章");
@@ -804,7 +775,7 @@ class ArticleServiceTest {
         existing.setPublishAt(publishedAt);
         existing.setSlug("keep-me");
         existing.setTitle("老标题");
-        when(articleMapper.selectById(5L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(5L)).thenReturn(existing);
         // 正文变了会先留一版快照，这里让"查已有版本"返回空列表
         when(articleRevisionMapper.selectMetaList(any(), anyInt())).thenReturn(List.of());
 
@@ -830,7 +801,7 @@ class ArticleServiceTest {
         existing.setSlug("mine");
         existing.setTitle("标题");
         existing.setRejectReason("图挂了");
-        when(articleMapper.selectById(5L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(5L)).thenReturn(existing);
         when(articleRevisionMapper.selectMetaList(any(), anyInt())).thenReturn(List.of());
 
         AuthorArticleDTO dto = new AuthorArticleDTO();
@@ -850,7 +821,7 @@ class ArticleServiceTest {
         existing.setId(5L);
         existing.setUserId(9L);
         existing.setStatus(ArticleService.STATUS_PUBLISHED);
-        when(articleMapper.selectById(5L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(5L)).thenReturn(existing);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service().deleteForAuthor(5L, 9L));
@@ -899,7 +870,7 @@ class ArticleServiceTest {
         existing.setSlug("live-post");
         existing.setContentMd("正文");
         existing.setPublishAt(LocalDateTime.now().minusDays(1));
-        when(articleMapper.selectById(7L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(7L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("已发布");
@@ -911,7 +882,7 @@ class ArticleServiceTest {
         service().update(7L, dto, 9L, false);
 
         assertNull(capturedUpdate().getPublishAt(), "撤下后实体里的 publishAt 必须为空");
-        verify(articleMapper).update(isNull(), any(Wrapper.class));
+        verify(articleMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
     // ---------------- 审核状态不能被通用编辑器破坏 ----------------
@@ -924,7 +895,7 @@ class ArticleServiceTest {
         existing.setTitle("投稿");
         existing.setSlug("submission");
         existing.setContentMd("正文");
-        when(articleMapper.selectById(8L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(8L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("投稿");
@@ -949,7 +920,7 @@ class ArticleServiceTest {
         existing.setTitle("投稿");
         existing.setSlug("submission");
         existing.setContentMd("正文");
-        when(articleMapper.selectById(10L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(10L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("投稿");
@@ -962,7 +933,7 @@ class ArticleServiceTest {
                 () -> service().update(10L, dto, 9L, false));
         assertEquals(403, ex.getCode(),
                 "待审稿的上线只能走 approve（hasRole('super')），普通管理员用 PUT 不能绕过");
-        verify(articleMapper, never()).updateById(any(Article.class));
+        verify(articleMapper, never()).saveEditedFields(any(Article.class));
     }
 
     @Test
@@ -973,7 +944,7 @@ class ArticleServiceTest {
         existing.setTitle("投稿");
         existing.setSlug("submission");
         existing.setContentMd("正文");
-        when(articleMapper.selectById(12L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(12L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("投稿");
@@ -999,7 +970,7 @@ class ArticleServiceTest {
         existing.setSlug("live-post-2");
         existing.setContentMd("正文");
         existing.setPublishAt(LocalDateTime.now().minusDays(1));
-        when(articleMapper.selectById(15L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(15L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("已发布");
@@ -1021,7 +992,7 @@ class ArticleServiceTest {
         existing.setTitle("草稿");
         existing.setSlug("draft-post");
         existing.setContentMd("正文");
-        when(articleMapper.selectById(16L)).thenReturn(existing);
+        when(articleMapper.lockForEdit(16L)).thenReturn(existing);
 
         ArticleDTO dto = new ArticleDTO();
         dto.setTitle("草稿");
@@ -1048,5 +1019,44 @@ class ArticleServiceTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> service().forceDelete(11L));
         assertEquals(409, ex.getCode(), "已经不存在的删除应当报冲突，而不是假装成功");
         verify(articleTagMapper, never()).delete(any());
+    }
+
+    @Test
+    void discardedScheduleDoesNotCountAsPublished() {
+        Article due = article(5L, 0);
+        due.setPublishAt(LocalDateTime.now().minusMinutes(1));
+        when(articleMapper.selectList(any())).thenReturn(List.of(due));
+        ArgumentCaptor<Wrapper<Article>> update = ArgumentCaptor.forClass(Wrapper.class);
+        when(articleMapper.update(isNull(), update.capture())).thenReturn(0);
+        assertEquals(0, service().promoteScheduledArticles());
+        String sql = update.getValue().getSqlSegment();
+        assertTrue(sql.contains("publish_at") && sql.contains("status") && sql.contains("is_deleted"));
+        verify(redisTemplate, never()).delete(any(java.util.Collection.class));
+    }
+
+    @Test
+    void staleReviewReturnsConflict() {
+        when(articleMapper.selectById(5L)).thenReturn(article(5L, ArticleService.STATUS_PENDING));
+        BusinessException ex = assertThrows(BusinessException.class, () -> service().approve(5L));
+        assertEquals(409, ex.getCode());
+    }
+
+    @Test
+    void editVersionIgnoresViewsButRejectsStaleContent() {
+        ArticleService s = service();
+        Article current = article(5L, 0);
+        current.setTitle("Original");
+        when(articleMapper.lockForEdit(5L)).thenReturn(current);
+        s.attachEditVersion(current, List.of());
+        String version = current.getEditVersion();
+        current.setViewCount(123);
+        s.attachEditVersion(current, List.of());
+        assertEquals(version, current.getEditVersion());
+        current.setTitle("Updated by another editor");
+        ArticleDTO dto = new ArticleDTO();
+        dto.setEditVersion(version);
+        BusinessException ex = assertThrows(BusinessException.class, () -> s.update(5L, dto, 1L, false));
+        assertEquals(409, ex.getCode());
+        verify(articleMapper, never()).saveEditedFields(any());
     }
 }

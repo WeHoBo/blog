@@ -97,7 +97,10 @@ public class AdminUserController {
 
         if (form.getNickname() != null) user.setNickname(form.getNickname());
         if (form.getPassword() != null && !form.getPassword().isBlank()) {
-            user.setPassword(passwordEncoder.encode(form.getPassword()));
+            if (form.getPassword().length() < 6 || form.getPassword().length() > 30) {
+                throw new BusinessException(400, "密码长度 6-30 位");
+            }
+            user.useEncodedPassword(passwordEncoder.encode(form.getPassword()));
             identityChanged = true;
         }
         userMapper.updateById(user);

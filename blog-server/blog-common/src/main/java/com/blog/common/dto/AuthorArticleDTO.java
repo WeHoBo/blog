@@ -26,6 +26,9 @@ public class AuthorArticleDTO {
     @Size(max = 200, message = "标题不能超过 200 字")
     private String title;
 
+    @Size(max = 64, message = "编辑版本不合法")
+    private String editVersion;
+
     @Size(max = 500, message = "摘要不能超过 500 字")
     private String summary;
 

@@ -4,8 +4,10 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.IdUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.File;
 
@@ -36,7 +38,7 @@ public class LocalFileStorage implements FileStorage {
             FileUtil.writeFromStream(file.getInputStream(), dest);
             return baseUrl + "/" + dateDir + "/" + fileName;
         } catch (Exception e) {
-            throw new com.blog.common.exception.BusinessException("文件上传失败: " + e.getMessage());
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "文件存储暂不可用，请稍后重试", e);
         }
     }
 }
