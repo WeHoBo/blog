@@ -361,10 +361,9 @@ def _vector_search(question: str, top_k: int, article_id) -> list[dict]:
     store = getattr(agent_tools, "_vector_store", None)
     if store is None:
         return []
-    hits = store.search(question, top_k)
     if article_id:
-        hits = [h for h in hits if str(h.get("article_id", "")) == str(article_id)]
-    return hits
+        return store.search(question, top_k, article_id=str(article_id))
+    return store.search(question, top_k)
 
 
 def _contexts_to_sources(contexts: list[dict]) -> list[dict]:

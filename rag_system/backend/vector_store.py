@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 import chromadb
+import db
 
 from config import CHROMA_DIR, EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
 
@@ -103,8 +104,10 @@ class EmbeddingClient:
             for attempt in range(2):
                 try:
                     resp = self._client.embeddings.create(model=self.model, input=part)
-                    # 按输入顺序返回向量
-                    out.extend(item.embedding for item in resp.data)
+                    items = sorted(resp.data, key=lambda item: item.index)
+                    if [item.index for item in items] != list(range(len(part))):
+                        raise ValueError("向量服务返回的条目和本批请求不匹配")
+                    out.extend(item.embedding for item in items)
                     last_err = None
                     break
                 except Exception as e:  # noqa: BLE001 - 任何失败都值得重试一次
@@ -158,24 +161,40 @@ class VectorStore:
         return len(texts)
 
     def add_article_chunks(self, article_id: str, title: str, slug: str, category: str,
-                           chunks: list[dict[str, Any]]) -> int:
+                           chunks: list[dict[str, Any]], revision: int | None = None) -> int:
         """
         将一篇博客文章的所有文本块向量化后写入向量库（source_type=article）。
         """
         texts = [c["text"] for c in chunks]
+        if not texts:
+            raise ValueError("文章没有可索引的文本")
+        if revision is None:
+            revision = db.reserve_article_revision(article_id)
         embeddings = self.embedding.embed_documents(texts)
-        prefix = f"a{article_id}_"
+        prefix = f"a{article_id}_v{revision}_"
         self.collection.add(
             ids=[f"{prefix}{i}" for i in range(len(texts))],
             embeddings=embeddings,
             documents=texts,
             metadatas=[
                 {"article_id": article_id, "title": title, "slug": slug, "category": category,
-                 "page": c.get("page", 0), "chunk_index": i, "source_type": "article"}
+                 "page": c.get("page", 0), "chunk_index": i, "source_type": "article",
+                 "revision": revision}
                 for i, c in enumerate(chunks)
             ],
         )
+        if not db.activate_article_revision(article_id, revision):
+            self.collection.delete(ids=[f"{prefix}{i}" for i in range(len(texts))])
+            raise ValueError("入库期间文章已更新或撤回")
+        self._remove_older_chunks(article_id, revision)
         return len(texts)
+
+    def _remove_older_chunks(self, article_id: str, revision: int) -> None:
+        existing = self.collection.get(where={"article_id": article_id}, include=["metadatas"])
+        obsolete = [key for key, meta in zip(existing["ids"], existing["metadatas"])
+                    if meta.get("revision", 0) < revision]
+        for start in range(0, len(obsolete), 500):
+            self.collection.delete(ids=obsolete[start:start + 500])
 
     def delete_document(self, doc_id: str) -> None:
         """删除某个文档对应的全部向量块"""
@@ -183,7 +202,8 @@ class VectorStore:
 
     def delete_article(self, article_id: str) -> None:
         """删除某篇博客文章对应的全部向量块"""
-        self.collection.delete(where={"article_id": article_id})
+        revision = db.reserve_article_revision(article_id, withdraw=True)
+        self._remove_older_chunks(article_id, revision)
 
     def list_article_ids(self) -> set[str]:
         """
@@ -193,11 +213,7 @@ class VectorStore:
         ⚠️ 不要把它的结果当成「文章列表」直接用 —— 它只反映**曾经入过库**的事实，
         一篇文章被下架后，只要没人清理，它的 id 依然会在这里。
         """
-        try:
-            result = self.collection.get(include=["metadatas"])
-        except Exception as e:
-            print(f"[向量库] 列出文章 id 失败: {e}")
-            return set()
+        result = self.collection.get(where={"source_type": "article"}, include=["metadatas"])
 
         ids: set[str] = set()
         for meta in (result.get("metadatas") or []):
@@ -213,6 +229,7 @@ class VectorStore:
         top_k: int = 5,
         doc_id: str | None = None,
         max_per_article: int | None = None,
+        article_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         语义检索：对问题向量化后在向量库中找最相似的 top_k 个文本块。
@@ -224,20 +241,32 @@ class VectorStore:
         """
         query_embedding = self.embedding.embed_query(query)
         where = {"doc_id": doc_id} if doc_id else None
+        if article_id is not None:
+            where = {"article_id": str(article_id)}
         # 有配额时先多取候选，否则筛掉超额片段后可能填不满 top_k（白丢召回）。
         # 只放大 Chroma 的返回条数，不多花一次 embedding 调用 —— 贵的是那个。
         fetch = top_k
         if max_per_article and max_per_article > 0:
             fetch = min(max(top_k * 3, top_k), 50)
-        result = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=fetch,
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
+        wanted = fetch
+        while True:
+            result = self.collection.query(query_embeddings=[query_embedding], n_results=fetch,
+                                           where=where, include=["documents", "metadatas", "distances"])
+            metas = result["metadatas"][0]
+            ids = {str(m["article_id"]) for m in metas if "article_id" in m}
+            active = db.active_article_revisions(ids) if ids else {}
+            visible = [i for i, meta in enumerate(metas)
+                       if "article_id" not in meta or meta.get("revision", 0) == active.get(str(meta["article_id"]), 0)]
+            if len(visible) >= wanted or len(metas) < fetch:
+                break
+            limit = self.collection.count()
+            if fetch >= limit:
+                break
+            fetch = min(fetch * 2, limit)
         # 组装成易用的列表结构
         hits: list[dict[str, Any]] = []
-        for i, text in enumerate(result["documents"][0]):
+        for i in visible[:wanted]:
+            text = result["documents"][0][i]
             meta = result["metadatas"][0][i]
             hit = {
                 "text": text,

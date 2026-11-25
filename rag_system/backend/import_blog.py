@@ -78,8 +78,8 @@ def prune_index(keep_ids: list) -> None:
         print(f"[对账] 库中 {data.get('existing', 0)} 篇, 应保留 {data.get('kept', 0)} 篇,"
               f" 清理残留 {len(removed)} 篇" + (f": {removed}" if removed else ""))
     except Exception as e:
-        # 对账失败不该让整次导入看起来失败：文章确实已经进库了，只是残留还没清
         print(f"[对账] 失败（不影响导入结果，可稍后单独重跑）: {e}")
+        raise
 
 
 def main() -> None:

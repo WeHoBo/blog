@@ -308,16 +308,18 @@ def _web_search_available() -> bool:
 # ---------------- 接口三：博客文章批量入库 ----------------
 @app.post("/ingest-articles")
 async def ingest_articles(articles: list[ArticleIn]):
-    """接收博客文章列表 -> 切分 -> 向量化入库（幂等：重复入库同一篇文章会先清旧块）"""
+    """生成新版向量后切换可见版本，生成失败时继续提供原版。"""
     total_chunks = 0
     failed = []
-    for art in articles:
-        if not art.content_md or not art.content_md.strip():
-            continue
+    # 先为整个批次占版本。前一篇生成向量时收到的撤稿/更新也能取消队列中的旧稿。
+    revisions = await asyncio.to_thread(
+        lambda: [db.reserve_article_revision(str(art.id)) for art in articles]
+    )
+    for art, revision in zip(articles, revisions):
         article_id = str(art.id)
         try:
-            # 清掉该文章的旧向量块，保证重复导入不产生重复
-            await asyncio.to_thread(vector_store.delete_article, article_id)
+            if not art.content_md.strip():
+                raise ValueError("文章没有可索引的文本")
             # 复用 PDF 的切分逻辑：把整篇 markdown 作为一页切块
             chunks = await asyncio.to_thread(
                 pdf_parser.split_text, [(1, art.content_md)], config.CHUNK_SIZE, config.CHUNK_OVERLAP
@@ -326,7 +328,7 @@ async def ingest_articles(articles: list[ArticleIn]):
             chunks = [c for c in chunks if c.get("text") and c["text"].strip()]
             n = await asyncio.to_thread(
                 vector_store.add_article_chunks, article_id, art.title,
-                art.slug, art.category, chunks
+                art.slug, art.category, chunks, revision
             )
             total_chunks += n
         except Exception as e:
@@ -353,6 +355,8 @@ async def delete_articles(body: ArticleIdsIn):
             removed.append(str(aid))
         except Exception as e:
             print(f"[删除] 文章 {aid} 向量删除失败: {e}")
+    if len(removed) != len(body.ids):
+        raise HTTPException(status_code=503, detail="部分文章索引删除失败，请重试")
     return {"message": "已删除", "removed": len(removed), "ids": removed}
 
 
@@ -386,6 +390,8 @@ async def prune_index(body: PruneIndexIn):
             removed.append(aid)
         except Exception as e:
             print(f"[对账] 文章 {aid} 向量删除失败: {e}")
+    if len(removed) != len(stale):
+        raise HTTPException(status_code=503, detail="部分残留索引清理失败，请重试")
 
     print(f"[对账] 库中 {len(existing)} 篇，应保留 {len(existing & keep)} 篇，清理残留 {len(removed)} 篇: {removed}")
     return {

@@ -41,6 +41,12 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             answer     TEXT NOT NULL,       -- 大模型回答
             created_at TEXT NOT NULL        -- 问答时间（ISO 格式）
         );
+
+        CREATE TABLE IF NOT EXISTS article_index_version (
+            article_id TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL,
+            active INTEGER NOT NULL
+        );
         """
     )
     conn.commit()
@@ -56,6 +62,44 @@ def get_conn() -> sqlite3.Connection:
         _conn.row_factory = sqlite3.Row  # 让查询结果可以按字段名访问
         _init_tables(_conn)
     return _conn
+
+
+def reserve_article_revision(article_id: str, *, withdraw: bool = False) -> int:
+    """0 refers to legacy unversioned chunks, -1 hides a withdrawn article immediately."""
+    with _lock:
+        conn = get_conn()
+        with conn:
+            conn.execute(
+                """INSERT INTO article_index_version(article_id, revision, active) VALUES (?, 1, ?)
+                   ON CONFLICT(article_id) DO UPDATE SET revision=revision+1,
+                   active=CASE WHEN ? THEN -1 ELSE active END""",
+                (article_id, -1 if withdraw else 0, withdraw),
+            )
+            return conn.execute("SELECT revision FROM article_index_version WHERE article_id=?",
+                                (article_id,)).fetchone()[0]
+
+
+def activate_article_revision(article_id: str, revision: int) -> bool:
+    with _lock:
+        conn = get_conn()
+        with conn:
+            return conn.execute("UPDATE article_index_version SET active=? WHERE article_id=? AND revision=?",
+                                (revision, article_id, revision)).rowcount == 1
+
+
+def active_article_revisions(article_ids: set[str]) -> dict[str, int]:
+    ids = list(article_ids)
+    active = {}
+    with _lock:
+        conn = get_conn()
+        for start in range(0, len(ids), 500):
+            batch = ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            active.update(conn.execute(
+                f"SELECT article_id, active FROM article_index_version WHERE article_id IN ({placeholders})",
+                batch,
+            ).fetchall())
+    return active
 
 
 # ---------------- 文档 CRUD ----------------
